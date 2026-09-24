@@ -1,0 +1,21 @@
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+.DS_Store
+data/raw/*
+data/silver/*
+data/gold/*
+mlruns/*
+!data/raw/.gitkeep
+!data/silver/.gitkeep
+!data/gold/.gitkeep
+*.egg-info/
+# Small result tables are versioned so the findings are reviewable without rerunning.
+!data/gold/run_summary.json
+!data/gold/model_metrics.csv
+!data/gold/reconciliation_metrics.csv
+!data/gold/interval_coverage.csv
+!data/gold/allocation_backtest.csv
+!data/gold/allocation.csv
+!data/gold/drift.csv

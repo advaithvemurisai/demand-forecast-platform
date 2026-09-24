@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "demand-forecast-platform"
+version = "0.2.0"
+description = "Production-oriented hierarchical demand forecasting and inventory allocation"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "pyarrow>=14.0",
+    "scikit-learn>=1.3",
+    "statsmodels>=0.14",
+    "lightgbm>=4.0",
+    "pulp>=2.7",
+    "highspy>=1.7",
+    "mlflow>=2.9",
+]
+
+[project.optional-dependencies]
+prophet = ["prophet>=1.1"]
+api = ["fastapi>=0.104", "uvicorn[standard]>=0.24"]
+data = ["certifi", "kaggle>=1.6"]
+dev = ["pytest>=7.4", "httpx>=0.25"]
+
+[project.scripts]
+forecast-pipeline = "forecasting.pipeline:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]
