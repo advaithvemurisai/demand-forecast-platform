@@ -220,7 +220,8 @@ with tabs[3]:
         "(90% of forecast demand). The scenario LP maximises expected fulfilled revenue over conformal demand scenarios; "
         "pro-rata splits supply in proportion to the point forecast."
     )
-    store = st.segmented_control("Store", sorted(allocation["store_id"].unique()), default=sorted(allocation["store_id"].unique())[0])
+    stores = sorted(allocation["store_id"].unique())
+    store = st.segmented_control("Store", stores, default=stores[0], required=True)
     rows = allocation[allocation["store_id"] == store].sort_values("dept_id")
     fig = go.Figure()
     fig.add_bar(x=rows["dept_id"], y=rows["allocated_quantity"], name="Scenario LP", marker_color=SERIES[0],
@@ -266,6 +267,8 @@ with tabs[4]:
         store=drift["node_id"].str.replace("store:store_id=", ""),
     )[["store", "status", "demand_psi", "residual_psi", "reference_mean_daily", "current_mean_daily"]]
     st.dataframe(view, hide_index=True, width="stretch", column_config={
+        "store": st.column_config.TextColumn("Store"),
+        "status": st.column_config.TextColumn("Status"),
         "demand_psi": st.column_config.NumberColumn("Demand-mix PSI", format="%.3f"),
         "residual_psi": st.column_config.NumberColumn("Residual PSI", format="%.3f"),
         "reference_mean_daily": st.column_config.NumberColumn("Prior-year daily units", format="%,.0f"),
