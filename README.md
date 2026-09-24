@@ -11,6 +11,18 @@ A retailer has to decide how much of each product to stock and which stores get 
 
 Too little stock loses sales; too much ties up cash. This project builds the pipeline a planning team would use to handle both problems, on real Walmart sales data (the M5 competition dataset, California stores).
 
+## What's being forecast
+
+**Daily unit sales of 3,049 Walmart products in each of 4 California stores, 28 days ahead.** The products span three categories:
+
+| Category | Products | Departments |
+|---|---|---|
+| Foods | 1,437 | 3 |
+| Household | 1,047 | 2 |
+| Hobbies | 565 | 2 |
+
+That is 12,196 product-store combinations, rolled up into departments, categories, stores and the state total. The data is the public M5 competition dataset. Walmart anonymised the product names, so items appear as codes such as `FOODS_3_090`.
+
 ## What each step solves
 
 | Step | Business question | Result |

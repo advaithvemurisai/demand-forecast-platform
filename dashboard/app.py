@@ -79,6 +79,14 @@ st.markdown(
     "This platform turns Walmart store sales into forecasts that add up at every level, a confidence range for each, "
     "and a weekly allocation that maximises revenue when supply is short."
 )
+products = load("safety_stock").drop_duplicates("item_id")
+by_category = products["cat_id"].value_counts()
+st.markdown(
+    f"**What's forecast.** Daily unit sales of {len(products):,} Walmart products "
+    f"({by_category['FOODS']:,} food, {by_category['HOUSEHOLD']:,} household and {by_category['HOBBIES']:,} hobby items) "
+    f"in each of {run['n_series'] // len(products)} California stores, 28 days ahead, rolled up to departments, categories, "
+    "stores and the state. Product names are anonymised in the public data, so items appear as codes like FOODS_3_090."
+)
 st.caption(
     f"M5 (Walmart) California: {run['n_series']:,} item-store series across 4 stores, forecast at 6 hierarchy levels. "
     f"Three rolling backtests plus a holdout on the M5 validation window ({run['origins']['holdout']} → {run['origins']['production']}). "
