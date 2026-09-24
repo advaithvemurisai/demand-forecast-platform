@@ -38,17 +38,13 @@ mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 
 `python -m forecasting.pipeline --help` lists the options: `--states CA TX WI`, `--history-days`, `--folds`, `--estimators`, `--max-items` for a quick run, `--no-prophet` and `--no-mlflow`.
 
-## Dashboards
+## Dashboard
 
-| | What it is | How to open it |
-|---|---|---|
-| **Streamlit app** | Interactive Python app: forecast explorer with intervals, accuracy heatmaps, calibration, allocation and drift | **[Live app](https://advaithvemurisai-demand-forecast-platform-dashboardapp-wh5iys.streamlit.app/)**, or `streamlit run dashboard/app.py` locally |
-| **Tableau** | BI workbook on the gold tables | See [tableau/README.md](tableau/README.md) |
-| **Looker Studio** | Free, shareable Google report | Build steps in [looker_studio/README.md](looker_studio/README.md); link: *add after sharing* |
+**[Live Streamlit app](https://advaithvemurisai-demand-forecast-platform-dashboardapp-wh5iys.streamlit.app/)**. It includes a forecast explorer with prediction intervals down to a single item, accuracy heatmaps by level and method, interval calibration, the LP-vs-pro-rata allocation, and drift monitoring. Run it locally with `streamlit run dashboard/app.py`.
 
-The Streamlit app reads `data/dashboard/`, a 3 MB extract that the pipeline writes on every run and that is committed to git. So the hosted app needs neither the raw data nor the modelling stack; `dashboard/requirements.txt` installs only Streamlit, pandas, pyarrow and Plotly.
+The app reads `data/dashboard/`, a 3 MB extract that the pipeline writes on every run and that is committed to git. So the hosted app needs neither the raw data nor the modelling stack; `dashboard/requirements.txt` installs only Streamlit, pandas, pyarrow and Plotly. It is hosted on Streamlit Community Cloud and redeploys automatically on every push to `main`.
 
-The live app is hosted on Streamlit Community Cloud and redeploys automatically on every push to `main`. To host your own copy, fork the repo, choose **Create app** at [share.streamlit.io](https://share.streamlit.io), and set the main file path to `dashboard/app.py`.
+Other formats: the gold tables are BI-ready. [tableau/README.md](tableau/README.md) documents a Tableau data model and layout, and [looker_studio/](looker_studio/) builds CSVs for a Looker Studio report.
 
 ## Evaluation design
 
