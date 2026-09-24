@@ -1,5 +1,7 @@
 # Hierarchical Demand Forecasting and Allocation Platform
 
+**[▶ Live dashboard](https://advaithvemurisai-demand-forecast-platform-dashboardapp-wh5iys.streamlit.app/)**
+
 This project forecasts daily retail demand across the M5 (Walmart) hierarchy, reconciles the forecasts so every level adds up, attaches calibrated prediction intervals, and allocates constrained inventory with a linear program. Modelling and reporting are kept separate: the pipeline writes gold tables, and those tables feed a FastAPI service and Tableau.
 
 ## Architecture
@@ -40,16 +42,13 @@ mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 
 | | What it is | How to open it |
 |---|---|---|
-| **Streamlit app** | Interactive Python app: forecast explorer with intervals, accuracy heatmaps, calibration, allocation and drift | `streamlit run dashboard/app.py`; live link: *add after deploying (below)* |
+| **Streamlit app** | Interactive Python app: forecast explorer with intervals, accuracy heatmaps, calibration, allocation and drift | **[Live app](https://advaithvemurisai-demand-forecast-platform-dashboardapp-wh5iys.streamlit.app/)**, or `streamlit run dashboard/app.py` locally |
 | **Tableau** | BI workbook on the gold tables | See [tableau/README.md](tableau/README.md) |
 | **Looker Studio** | Free, shareable Google report | Build steps in [looker_studio/README.md](looker_studio/README.md); link: *add after sharing* |
 
 The Streamlit app reads `data/dashboard/`, a 3 MB extract that the pipeline writes on every run and that is committed to git. So the hosted app needs neither the raw data nor the modelling stack; `dashboard/requirements.txt` installs only Streamlit, pandas, pyarrow and Plotly.
 
-**Deploy to Streamlit Community Cloud (free):**
-1. Push the repo to GitHub.
-2. At [share.streamlit.io](https://share.streamlit.io), choose **Create app**, pick the repo, and set the main file path to `dashboard/app.py`.
-3. Paste the resulting `*.streamlit.app` URL into the table above.
+The live app is hosted on Streamlit Community Cloud and redeploys automatically on every push to `main`. To host your own copy, fork the repo, choose **Create app** at [share.streamlit.io](https://share.streamlit.io), and set the main file path to `dashboard/app.py`.
 
 ## Evaluation design
 
