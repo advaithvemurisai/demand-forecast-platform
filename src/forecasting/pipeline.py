@@ -620,10 +620,11 @@ def summarise(cfg: Config, outputs: dict[str, pd.DataFrame], selected_model: str
 
 
 def write_gold(cfg: Config, outputs: dict[str, pd.DataFrame], summary: dict[str, object]) -> None:
-    from forecasting.export import export_gold
+    from forecasting.export import export_dashboard_extract, export_gold
 
     export_gold(outputs, cfg.gold_dir)
     (cfg.gold_dir / "run_summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    export_dashboard_extract(cfg.gold_dir, cfg.root / "data" / "dashboard")
     log.info("Wrote %d gold tables to %s", len(outputs), cfg.gold_dir)
 
 

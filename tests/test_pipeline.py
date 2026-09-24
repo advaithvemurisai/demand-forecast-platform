@@ -54,3 +54,12 @@ def test_naive_scale_ignores_leading_zeros():
     history = np.array([[0.0, 0.0, 0.0, 2.0, 4.0, 2.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
     # diffs counted from the first sale onward: (4-2)^2, (2-4)^2 -> mean 4
     np.testing.assert_allclose(naive_scale_sq(history), [4.0, 0.0])
+
+
+def test_pipeline_writes_dashboard_extract(synthetic_root):
+    cfg = Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False)
+    run(cfg)
+    extract = synthetic_root / "data" / "dashboard"
+    for name in ("production_forecast", "reconciliation_metrics", "backtest_forecasts", "allocation", "drift", "safety_stock"):
+        assert (extract / f"{name}.parquet").exists()
+    assert json.loads((extract / "run_summary.json").read_text())["served_method"]

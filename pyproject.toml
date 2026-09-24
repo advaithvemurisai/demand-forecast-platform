@@ -23,6 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 prophet = ["prophet>=1.1"]
 api = ["fastapi>=0.104", "uvicorn[standard]>=0.24"]
+dashboard = ["streamlit>=1.40", "plotly>=5.20"]
 data = ["certifi", "kaggle>=1.6"]
 dev = ["pytest>=7.4", "httpx>=0.25"]
 

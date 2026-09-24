@@ -36,6 +36,21 @@ mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 
 `python -m forecasting.pipeline --help` lists the options: `--states CA TX WI`, `--history-days`, `--folds`, `--estimators`, `--max-items` for a quick run, `--no-prophet` and `--no-mlflow`.
 
+## Dashboards
+
+| | What it is | How to open it |
+|---|---|---|
+| **Streamlit app** | Interactive Python app: forecast explorer with intervals, accuracy heatmaps, calibration, allocation and drift | `streamlit run dashboard/app.py`; live link: *add after deploying (below)* |
+| **Tableau** | BI workbook on the gold tables | See [tableau/README.md](tableau/README.md) |
+| **Looker Studio** | Free, shareable Google report | Build steps in [looker_studio/README.md](looker_studio/README.md); link: *add after sharing* |
+
+The Streamlit app reads `data/dashboard/`, a 3 MB extract that the pipeline writes on every run and that is committed to git. So the hosted app needs neither the raw data nor the modelling stack; `dashboard/requirements.txt` installs only Streamlit, pandas, pyarrow and Plotly.
+
+**Deploy to Streamlit Community Cloud (free):**
+1. Push the repo to GitHub.
+2. At [share.streamlit.io](https://share.streamlit.io), choose **Create app**, pick the repo, and set the main file path to `dashboard/app.py`.
+3. Paste the resulting `*.streamlit.app` URL into the table above.
+
 ## Evaluation design
 
 - **Scope.** The run covers California: 4 stores, 12,196 item-store series and 46 aggregate nodes (department×store, category×store, store, state, total). All figures below are WMAPE.
@@ -114,6 +129,8 @@ The LP deliberately trades 0.8 points of unit fill rate for higher-value units, 
 | `forecasting.drift` | PSI with open-ended bins, and a retraining flag combining PSI with WMAPE decay |
 | `forecasting.pipeline` | Orchestration, fold design, gold tables, MLflow logging |
 | `api/main.py` | FastAPI endpoints with filtering and pagination |
+| `dashboard/app.py` | Streamlit app on the committed `data/dashboard` extract |
+| `looker_studio/` | CSV extract builder and a step-by-step Looker Studio report guide |
 | `tableau/README.md` | Data sources, joins, suggested dashboard, calculated fields |
 | `notebooks/walkthrough.ipynb` | Executed walkthrough of every result above |
 

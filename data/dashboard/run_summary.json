@@ -1,0 +1,209 @@
+{
+  "config": {
+    "root": "/Users/advaithvs/Documents/University/GTM/demand-forecast-platform",
+    "states": [
+      "CA"
+    ],
+    "horizon": 28,
+    "history_days": 548,
+    "n_backtest_folds": 3,
+    "sarima_days": 364,
+    "service_level": 0.95,
+    "interval_levels": [
+      0.8,
+      0.95
+    ],
+    "supply_ratio": 0.9,
+    "n_scenarios": 25,
+    "n_estimators": 300,
+    "prophet": true,
+    "mlflow": true,
+    "max_items": null,
+    "experiment": "m5-hierarchical"
+  },
+  "origins": {
+    "backtest_1": "2016-01-31",
+    "backtest_2": "2016-02-28",
+    "backtest_3": "2016-03-27",
+    "holdout": "2016-04-24",
+    "production": "2016-05-22"
+  },
+  "n_series": 12196,
+  "selected_bottom_model": "lgbm_global",
+  "reconciliation_wmape": {
+    "base": {
+      "category": 0.0785,
+      "department": 0.0977,
+      "item": 0.7407,
+      "state": 0.052,
+      "store": 0.0644,
+      "total": 0.052
+    },
+    "bottom_up": {
+      "category": 0.0974,
+      "department": 0.1129,
+      "item": 0.7407,
+      "state": 0.0653,
+      "store": 0.0824,
+      "total": 0.0653
+    },
+    "mint_diagonal": {
+      "category": 0.0901,
+      "department": 0.1063,
+      "item": 0.7412,
+      "state": 0.0588,
+      "store": 0.0756,
+      "total": 0.0588
+    },
+    "mint_oos": {
+      "category": 0.0882,
+      "department": 0.1048,
+      "item": 0.7413,
+      "state": 0.0571,
+      "store": 0.0742,
+      "total": 0.0571
+    },
+    "top_down": {
+      "category": 0.0969,
+      "department": 0.1154,
+      "item": 0.7698,
+      "state": 0.052,
+      "store": 0.0812,
+      "total": 0.052
+    }
+  },
+  "reconciliation_wmape_holdout": {
+    "base": {
+      "category": 0.069,
+      "department": 0.086,
+      "item": 0.7267,
+      "state": 0.0462,
+      "store": 0.0578,
+      "total": 0.0462
+    },
+    "bottom_up": {
+      "category": 0.0985,
+      "department": 0.1131,
+      "item": 0.7267,
+      "state": 0.0693,
+      "store": 0.0861,
+      "total": 0.0693
+    },
+    "mint_diagonal": {
+      "category": 0.0899,
+      "department": 0.105,
+      "item": 0.727,
+      "state": 0.0636,
+      "store": 0.0788,
+      "total": 0.0636
+    },
+    "mint_oos": {
+      "category": 0.0827,
+      "department": 0.0986,
+      "item": 0.7275,
+      "state": 0.0585,
+      "store": 0.0724,
+      "total": 0.0585
+    },
+    "top_down": {
+      "category": 0.0964,
+      "department": 0.1152,
+      "item": 0.75,
+      "state": 0.0462,
+      "store": 0.0871,
+      "total": 0.0462
+    }
+  },
+  "model_wmape_item": {
+    "lgbm_global": 0.7407,
+    "lgbm_local": 0.7433,
+    "naive": 1.0367,
+    "seasonal_naive": 0.8876
+  },
+  "wrmsse_holdout": {
+    "base": 0.4923,
+    "bottom_up": 0.6066,
+    "mint_diagonal": 0.5651,
+    "mint_oos": 0.5364,
+    "top_down": 0.5886
+  },
+  "wrmsse_backtest": {
+    "base": 0.5492,
+    "bottom_up": 0.5773,
+    "mint_diagonal": 0.5533,
+    "mint_oos": 0.555,
+    "top_down": 0.5862
+  },
+  "interval_coverage": {
+    "0.8": {
+      "category": 0.7817,
+      "department": 0.7687,
+      "item": 0.8042,
+      "state": 0.7857,
+      "store": 0.7381,
+      "total": 0.7857
+    },
+    "0.95": {
+      "category": 0.9385,
+      "department": 0.9418,
+      "item": 0.9526,
+      "state": 0.9286,
+      "store": 0.9256,
+      "total": 0.9286
+    }
+  },
+  "allocation": {
+    "lp_scenario": {
+      "units_fulfilled": 1296284.5212,
+      "units_demanded": 1519749.0,
+      "revenue_fulfilled": 4412310.0089,
+      "fill_rate": 0.853
+    },
+    "pro_rata": {
+      "units_fulfilled": 1308155.9018,
+      "units_demanded": 1519749.0,
+      "revenue_fulfilled": 4344291.8287,
+      "fill_rate": 0.8608
+    }
+  },
+  "drift": [
+    {
+      "node_id": "store:store_id=CA_1",
+      "psi": 0.009447917619286188,
+      "drift": false,
+      "retrain": false,
+      "retrain_reasons": "stable"
+    },
+    {
+      "node_id": "store:store_id=CA_2",
+      "psi": 0.031301492189322475,
+      "drift": false,
+      "retrain": false,
+      "retrain_reasons": "stable"
+    },
+    {
+      "node_id": "store:store_id=CA_3",
+      "psi": 0.007952892243652003,
+      "drift": false,
+      "retrain": false,
+      "retrain_reasons": "stable"
+    },
+    {
+      "node_id": "store:store_id=CA_4",
+      "psi": 0.012032256539912954,
+      "drift": false,
+      "retrain": false,
+      "retrain_reasons": "stable"
+    }
+  ],
+  "timings_seconds": {
+    "load_and_features": 25.0,
+    "models_backtest_1": 203.2,
+    "models_backtest_2": 183.8,
+    "models_backtest_3": 206.2,
+    "models_holdout": 207.5,
+    "models_production": 90.4,
+    "total": 919.4
+  },
+  "served_method": "mint_diagonal"
+}
