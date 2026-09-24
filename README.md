@@ -27,11 +27,11 @@ That is 12,196 product-store combinations, rolled up into departments, categorie
 
 | Step | Business question | Result |
 |---|---|---|
-| **Forecast** | How much will each item sell in each store over the next four weeks? | 17% lower item-level error than repeating last week's sales |
+| **Forecast** | How much will each product sell in each store, day by day, over the next four weeks? | 17% lower product-level error than repeating last week's sales |
 | **Reconcile** | Do the item, store and regional plans agree? | Forecasts add up at every level, and are more accurate than simply adding up item forecasts |
 | **Quantify uncertainty** | How sure are we, and how bad could it get? | 95% forecast ranges contain about 95% of actual sales |
-| **Safety stock** | How much buffer does each item need? | A stock target for every item at a 95% service level |
-| **Allocate** | When stock is short, who gets it? | +1.6% revenue and 17% fewer stockouts than a proportional split |
+| **Safety stock** | How much buffer does each product need in each store? | A stock target for every product at a 95% service level |
+| **Allocate** | When the warehouse is short, which departments in which stores get the stock each week? | +1.6% revenue and 17% fewer stockouts than a proportional split |
 | **Monitor** | Has demand shifted enough to retrain? | Automated drift check with a retraining flag |
 
 ### Reconciliation in plain terms
@@ -45,14 +45,16 @@ flowchart LR
     D[Sales data] --> F[Features]
     F --> M[Forecast models]
     M --> R[Reconciliation]
-    R --> P[Ranges and safety stock]
-    P --> A[Allocation]
-    A --> O[Dashboard, API, BI exports]
+    R --> P[Forecast ranges]
+    P --> S[Product safety stock]
+    P --> A[Department allocation]
+    S --> O[Dashboard, API, BI exports]
+    A --> O
 ```
 
-- **Models:** machine-learning forecasts (LightGBM) compared against simple baselines and classical time-series models.
+- **Models:** one LightGBM model forecasts every product in every store. Department, category, store and state forecasts are the product forecasts added up, then reconciled with classical time-series (SARIMA) forecasts made directly at those levels.
 - **Evaluation:** tested on several past periods, then on a final held-out period that was never used to make any modelling choice.
-- **Allocation:** an optimisation model that weighs each unit's chance of selling against its value.
+- **Allocation:** each week, one warehouse supplies the 4 stores with only 90% of forecast demand, a simulated shortage. An optimisation model splits that supply across the 28 department × store combinations (7 departments × 4 stores), weighing each unit's chance of selling against the department's average selling price. A **stockout** is a department in a store whose actual demand that week exceeded what it was sent. Over 12 test weeks there were 255 of these under the optimiser vs 308 under a proportional split.
 - **Delivery:** results feed a Streamlit dashboard, a FastAPI service and Tableau / Looker Studio exports; runs are tracked in MLflow.
 
 The [walkthrough notebook](notebooks/walkthrough.ipynb) has the full results and methodology.
@@ -61,6 +63,7 @@ The [walkthrough notebook](notebooks/walkthrough.ipynb) has the full results and
 
 - A classical model forecasting the store and regional totals directly is more accurate at those levels, but its numbers don't add up across the hierarchy, so it can't be used as a plan.
 - The item-level model slightly under-forecasts, mostly on weekend peaks.
+- Allocation is by department, not by individual product, and it doesn't use the product-level safety stock; a real warehouse ships individual products.
 - The run covers California only; extending to all states needs more memory than a laptop.
 
 ## Run it
