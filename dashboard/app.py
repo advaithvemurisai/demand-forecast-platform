@@ -72,6 +72,13 @@ holdout = recon[recon["fold"] == "holdout"]
 
 # --------------------------------------------------------------------------- header
 st.title("Hierarchical demand forecasting and allocation")
+st.markdown(
+    "**The problem.** A retailer has to decide how much of each product to stock and which stores get it. "
+    "Forecasts made separately for items, stores and the whole region disagree, and when the warehouse is short "
+    "someone has to choose which stores go without. Too little stock loses sales; too much ties up cash. "
+    "This platform turns Walmart store sales into forecasts that add up at every level, a confidence range for each, "
+    "and a weekly allocation that maximises revenue when supply is short."
+)
 st.caption(
     f"M5 (Walmart) California: {run['n_series']:,} item-store series across 4 stores, forecast at 6 hierarchy levels. "
     f"Three rolling backtests plus a holdout on the M5 validation window ({run['origins']['holdout']} → {run['origins']['production']}). "
@@ -86,19 +93,42 @@ coverage = load("interval_coverage")
 item_cov = coverage[(coverage["level"] == "item") & (coverage["nominal"] == 0.95)]["coverage"].mean()
 served_category = holdout[(holdout["method"] == served) & (holdout["level"] == "category")]["wmape"].iloc[0]
 bottom_up_category = holdout[(holdout["method"] == "bottom_up") & (holdout["level"] == "category")]["wmape"].iloc[0]
+stockouts = alloc_bt.groupby("policy")["stockout_nodes"].sum()
+models = load("model_metrics")
+item_models = models[(models["fold"] == "holdout") & (models["level"] == "item")].set_index("model")["wmape"]
+drift = load("drift")
 
 kpis = st.columns(4)
 kpis[0].metric("Holdout WRMSSE (served method)", f"{run['wrmsse_holdout'][served]:.3f}",
-               help="Official M5 metric over the 6 CA hierarchy levels; lower is better. Not comparable to the 12-level M5 leaderboard.")
-kpis[1].metric("Category WMAPE, holdout", f"{served_category:.1%}", f"{(served_category - bottom_up_category) * 100:+.1f} pts vs bottom-up", delta_color="inverse")
-kpis[2].metric("95% interval coverage, items", f"{item_cov:.1%}", help="Out-of-sample: each fold is calibrated only on earlier folds.")
+               help="Overall forecast error across all 6 levels, from single items up to the state; lower is better. "
+                    "Below 1 means better than simply repeating last period's sales. Official M5 metric, but over 6 CA levels, "
+                    "so not comparable to the 12-level M5 leaderboard.")
+kpis[1].metric("Category WMAPE, holdout", f"{served_category:.1%}", f"{(served_category - bottom_up_category) * 100:+.1f} pts vs bottom-up", delta_color="inverse",
+               help="Average % miss on category sales per store, the level buyers plan at. Bottom-up (just adding up the item "
+                    "forecasts) is the naive way to get numbers that add up; reconciliation beats it.")
+kpis[2].metric("95% interval coverage, items", f"{item_cov:.1%}", help="How often actual sales landed inside the 95% range. Close to 95% means the ranges can be trusted to set "
+                    "safety stock. Out-of-sample: each fold is calibrated only on earlier folds.")
 kpis[3].metric("LP revenue vs pro-rata", f"{revenue['lp_scenario'] / revenue['pro_rata'] - 1:+.2%}", f"{weeks_won} of {len(weeks)} weeks won",
-               help="Constrained weekly supply (90% of forecast) across 28 store × department nodes, scored on realised demand.")
+               help="When the warehouse holds only 90% of forecast demand, the optimiser earns this much more revenue than splitting "
+                    "stock in proportion to each store's forecast. Scored on what actually sold, across 28 store × department nodes.")
+
+with st.expander("What each step solves for the business", expanded=True):
+    st.markdown(f"""
+| Step | Business question | Result |
+|---|---|---|
+| **Forecast** (LightGBM) | How much will each item sell in each store over the next 28 days? | {1 - item_models['lgbm_global'] / item_models['seasonal_naive']:.0%} lower item error than repeating last week's sales |
+| **Reconcile** (MinT) | Do the item, store and state plans agree, so every team works from the same numbers? | Forecasts add up at every level; category error {(bottom_up_category - served_category) / bottom_up_category:.0%} lower than adding up item forecasts |
+| **Intervals** (conformal) | How sure are we, and how bad could it get? | 95% ranges contain {item_cov:.1%} of actual item sales |
+| **Safety stock** | How much buffer does each item need to be in stock 95% of the time? | An order-up-to level for all {run['n_series']:,} items |
+| **Allocate** (scenario LP) | When stock is short, which stores and departments get it? | {revenue['lp_scenario'] / revenue['pro_rata'] - 1:+.2%} revenue and {1 - stockouts['lp_scenario'] / stockouts['pro_rata']:.0%} fewer stockouts than a proportional split |
+| **Monitor** (drift) | Has demand shifted enough that the model needs retraining? | {'Retraining flagged' if drift['retrain'].iloc[0] else 'Demand is stable; no retraining needed'} |
+""")
 
 tabs = st.tabs(["Forecast explorer", "Accuracy", "Intervals", "Allocation", "Drift", "Method"])
 
 # --------------------------------------------------------------------------- forecast explorer
 with tabs[0]:
+    st.caption("**Business question:** how much will sell, anywhere in the hierarchy, and how wide is the range of outcomes?")
     production = load("production_forecast")
     backtest = load("backtest_forecasts")
     left, right = st.columns([1, 3])
@@ -153,6 +183,7 @@ with tabs[0]:
 
 # --------------------------------------------------------------------------- accuracy
 with tabs[1]:
+    st.caption("**Business question:** which way of making the forecasts add up is the most accurate, and how good is the underlying model?")
     c1, c2 = st.columns(2)
     fold = c1.radio("Evaluation window", ["holdout", "backtest mean"], horizontal=True,
                     help="The holdout was never used for any modelling decision.")
@@ -172,10 +203,11 @@ with tabs[1]:
     st.plotly_chart(style(heat, 360), width="stretch")
     st.markdown(
         f"**Served:** {METHOD_LABELS[served]}, chosen by the lowest backtest WRMSSE among coherent methods. "
-        "The SARIMA base is the most accurate at the aggregate levels but *incoherent*: stores don't add up to the state."
+        "The SARIMA base is the most accurate at the aggregate levels but *incoherent*: stores don't add up to the state, "
+        "so a planner can't use it. MinT makes the numbers add up by moving the least reliable forecasts the most; "
+        "see the Method tab."
     )
 
-    models = load("model_metrics")
     model_level = st.selectbox("Model comparison level", LEVELS, format_func=LEVEL_LABELS.get, index=5)
     frame = models if fold == "backtest mean" else models[models["fold"] == "holdout"]
     if fold == "backtest mean":
@@ -191,6 +223,7 @@ with tabs[1]:
 
 # --------------------------------------------------------------------------- intervals
 with tabs[2]:
+    st.caption("**Business question:** can the forecast ranges be trusted to set safety stock? If a 95% range misses more than 5% of the time, stores run out more often than planned.")
     mean_cov = coverage.groupby(["level", "nominal"], as_index=False)[["coverage", "mean_width"]].mean()
     fig = go.Figure()
     for colour, nominal in zip(SERIES, (0.8, 0.95)):
@@ -214,6 +247,7 @@ with tabs[2]:
 
 # --------------------------------------------------------------------------- allocation
 with tabs[3]:
+    st.caption("**Business question:** when the warehouse can't cover every store's demand, who gets the stock?")
     allocation = load("allocation")
     st.markdown(
         f"**Week of {pd.Timestamp(allocation['week_start'].iloc[0]):%d %b %Y}.** The DC holds {allocation['supply'].iloc[0]:,.0f} units "
@@ -261,7 +295,7 @@ with tabs[3]:
 
 # --------------------------------------------------------------------------- drift
 with tabs[4]:
-    drift = load("drift")
+    st.caption("**Business question:** is the model still accurate, or has customer demand shifted enough to retrain it?")
     view = drift.assign(
         status=drift["drift"].map({True: "⚠️ Drift", False: "✅ Stable"}),
         store=drift["node_id"].str.replace("store:store_id=", ""),
@@ -281,6 +315,21 @@ with tabs[4]:
 # --------------------------------------------------------------------------- method
 with tabs[5]:
     st.markdown(f"""
+**The business problem.** A retailer plans stock at several levels at once: buyers plan categories, store managers plan their
+store, and the supply chain plans the region. If each level is forecast separately, the numbers disagree: the four stores
+might add up to 16,500 units while the state forecast says 17,200, and nobody knows which plan to order against. On top of
+that, supply is often short, so someone has to decide which stores go without. Getting it wrong means empty shelves in one
+store and excess stock in another.
+
+**What MinT reconciliation does, in plain terms.** It takes the forecasts from every level and finds the closest set of numbers
+that add up exactly. Forecasts that have been reliable barely move; noisy ones absorb most of the correction. So in the example
+above, if the state forecast has a good track record and one store's hasn't, most of the 700-unit gap is closed by adjusting that
+store. The name comes from the maths: of all the ways to make the numbers add up, it picks the one with the smallest total
+forecast-error variance (the *trace* of the error covariance matrix).
+
+**What the allocation adds.** A forecast says what *would* sell; the allocation decides what each store *gets*. The LP uses the
+forecast ranges to weigh the chance each unit actually sells against its price, so scarce stock goes where it earns the most.
+
 **Pipeline.** M5 raw → silver Parquet → leakage-safe features (every lag ≥ the 28-day horizon) → naive floors, LightGBM global/local,
 SARIMA and Prophet → bottom-up, top-down and MinT reconciliation → split-conformal intervals and safety stock → scenario LP allocation.
 Runs are tracked in MLflow; forecasts are served by FastAPI and exported for Tableau.
