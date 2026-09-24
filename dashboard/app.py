@@ -24,7 +24,7 @@ SEQUENTIAL = [[0, "#eaf2fc"], [1, "#1d5fae"]]
 LEVELS = ["total", "state", "store", "category", "department", "item"]
 LEVEL_LABELS = {"total": "Total", "state": "State", "store": "Store", "category": "Category × store", "department": "Department × store", "item": "Item × store"}
 METHOD_LABELS = {
-    "base": "SARIMA base (incoherent)", "bottom_up": "Bottom-up", "top_down": "Top-down",
+    "base": "Base forecast (unreconciled)", "bottom_up": "Bottom-up", "top_down": "Top-down",
     "mint_diagonal": "MinT, in-sample weights", "mint_oos": "MinT, out-of-sample weights",
 }
 MODEL_LABELS = {"naive": "Naive", "seasonal_naive": "Seasonal naive", "lgbm_local": "LightGBM local", "lgbm_global": "LightGBM global", "sarima": "SARIMA", "prophet": "Prophet"}
@@ -188,6 +188,7 @@ with tabs[0]:
             st.caption("Item-level backtest lines are omitted to keep the hosted extract small; the production forecast and intervals are shown for every item.")
         else:
             st.caption("Left of the dotted line: forecasts made at each fold origin vs actual sales. Right: the served 28-day production forecast.")
+        st.caption("The production forecast is LightGBM's item × store forecasts, reconciled with MinT so every level adds up.")
 
 # --------------------------------------------------------------------------- accuracy
 with tabs[1]:
@@ -209,9 +210,13 @@ with tabs[1]:
     heat.update_yaxes(autorange="reversed", gridcolor=SURFACE)
     heat.update_layout(title=dict(text=f"Reconciliation {metric.upper()} by level (lower is better; darker = further behind the best in its row)", font=dict(color=INK)))
     st.plotly_chart(style(heat, 360), width="stretch")
+    st.caption(
+        "Base forecast = each level forecast on its own: SARIMA from department × store upward, LightGBM at item × store "
+        "(so its item row matches bottom-up)."
+    )
     st.markdown(
         f"**Served:** {METHOD_LABELS[served]}, chosen by the lowest backtest WRMSSE among coherent methods. "
-        "The SARIMA base is the most accurate at the aggregate levels but *incoherent*: stores don't add up to the state, "
+        "The unreconciled SARIMA forecasts are the most accurate at the aggregate levels but *incoherent*: stores don't add up to the state, "
         "so a planner can't use it. MinT makes the numbers add up by moving the least reliable forecasts the most; "
         "see the Method tab."
     )
@@ -220,14 +225,24 @@ with tabs[1]:
     frame = models if fold == "backtest mean" else models[models["fold"] == "holdout"]
     if fold == "backtest mean":
         frame = frame[frame["fold"].str.startswith("backtest")]
-    bars = frame[frame["level"] == model_level].groupby("model")[metric].mean().sort_values(ascending=False)
-    fig = go.Figure(go.Bar(
-        x=bars.values, y=[MODEL_LABELS.get(m, m) for m in bars.index], orientation="h", marker_color=SERIES[0],
-        text=[f"{v:.3f}" for v in bars.values], textposition="outside", hovertemplate="%{y}: %{x:.4f}<extra></extra>",
-    ))
+    bars = (frame[frame["level"] == model_level].groupby(["model", "approach"], as_index=False)[metric].mean()
+            .sort_values(metric, ascending=False))
+    fig = go.Figure()
+    approach_labels = {"bottom_up": "Item forecasts added up", "direct": "Forecast directly at this level"}
+    for colour, (approach, label) in zip(SERIES, approach_labels.items()):
+        part = bars[bars["approach"] == approach]
+        fig.add_bar(x=part[metric], y=[MODEL_LABELS.get(m, m) for m in part["model"]], orientation="h", marker_color=colour,
+                    name=label, text=[f"{v:.3f}" for v in part[metric]], textposition="outside",
+                    hovertemplate="%{y}: %{x:.4f}<extra></extra>")
+    fig.update_yaxes(categoryorder="array", categoryarray=[MODEL_LABELS.get(m, m) for m in bars["model"]])
     fig.update_layout(title=dict(text=f"Base models at {LEVEL_LABELS[model_level].lower()} level", font=dict(color=INK)), bargap=0.45)
     fig.update_xaxes(title=metric.upper(), gridcolor=GRID, showgrid=True)
-    st.plotly_chart(style(fig, 320), width="stretch")
+    st.plotly_chart(style(fig, 340), width="stretch")
+    if model_level != "item":
+        st.caption(
+            "LightGBM and the naive baselines forecast each item × store; their bars here are those forecasts added up to this "
+            "level. SARIMA and Prophet forecast this level directly."
+        )
 
 # --------------------------------------------------------------------------- intervals
 with tabs[2]:
@@ -265,18 +280,21 @@ with tabs[3]:
     stores = sorted(allocation["store_id"].unique())
     store = st.segmented_control("Store", stores, default=stores[0], required=True)
     rows = allocation[allocation["store_id"] == store].sort_values("dept_id")
+    rows = rows.assign(dept_label=rows["dept_id"] + "<br>$" + rows["unit_value"].map("{:.2f}".format) + "/unit")
     fig = go.Figure()
-    fig.add_bar(x=rows["dept_id"], y=rows["allocated_quantity"], name="Scenario LP", marker_color=SERIES[0],
+    fig.add_bar(x=rows["dept_label"], y=rows["allocated_quantity"], name="Scenario LP", marker_color=SERIES[0],
                 customdata=rows[["stockout_risk", "unit_value"]], hovertemplate="LP: %{y:,.0f} units<br>stockout risk %{customdata[0]:.0%}<br>$%{customdata[1]:.2f}/unit<extra></extra>")
-    fig.add_bar(x=rows["dept_id"], y=rows["pro_rata_quantity"], name="Pro-rata", marker_color=SERIES[1],
+    fig.add_bar(x=rows["dept_label"], y=rows["pro_rata_quantity"], name="Pro-rata", marker_color=SERIES[1],
                 hovertemplate="Pro-rata: %{y:,.0f} units<extra></extra>")
-    fig.add_scatter(x=rows["dept_id"], y=rows["forecast"], mode="markers", name="Forecast demand",
+    fig.add_scatter(x=rows["dept_label"], y=rows["forecast"], mode="markers", name="Forecast demand",
                     marker=dict(color=INK, size=10, symbol="line-ew-open", line=dict(width=2)), hovertemplate="forecast %{y:,.0f}<extra></extra>")
     fig.update_layout(barmode="group", bargap=0.3, bargroupgap=0.08, title=dict(text=f"Allocation by department, {store}", font=dict(color=INK)))
-    st.plotly_chart(style(fig, 380, "Units for the week"), width="stretch")
+    st.plotly_chart(style(fig, 400, "Units for the week").update_layout(legend_y=-0.2), width="stretch")
     st.caption(
-        "The LP is revenue-weighted with no minimum-fill floor, so under a 10% shortfall it can give a low-value department "
-        "(here HOBBIES_2) nothing. `allocate_inventory(..., min_fill=...)` adds a service floor when that is unacceptable."
+        "Stock is allocated to 28 targets, 7 departments in each of 4 stores, all drawing on the same DC supply; this chart shows one store. "
+        "Labels give each department's average selling price. The LP is revenue-weighted with no minimum-fill floor, so under a 10% "
+        "shortfall it can give the cheapest department (HOBBIES_2) nothing. `allocate_inventory(..., min_fill=...)` adds a service "
+        "floor when that is unacceptable."
     )
 
     weekly = alloc_bt.pivot_table(index=["fold", "week"], columns="policy", values="revenue_fulfilled").reset_index()
@@ -288,7 +306,22 @@ with tabs[3]:
     fig.update_layout(title=dict(text="Backtest: LP revenue fulfilled vs pro-rata, per week (realised demand)", font=dict(color=INK)))
     st.plotly_chart(style(fig, 300), width="stretch")
 
+    shortfalls = alloc_bt.pivot_table(index=["fold", "week"], columns="policy", values="stockout_nodes").reset_index()
+    fig = go.Figure()
+    for colour, (policy, label) in zip(SERIES, {"lp_scenario": "Scenario LP", "pro_rata": "Pro-rata"}.items()):
+        fig.add_bar(x=weekly["label"], y=shortfalls[policy], name=label, marker_color=colour,
+                    hovertemplate="%{x}<br>" + label + ": %{y} of 28 short<extra></extra>")
+    fig.update_layout(barmode="group", title=dict(
+        text=f"Backtest: department × store targets that ran short each week (of 28; LP {stockouts['lp_scenario']:.0f} vs "
+             f"pro-rata {stockouts['pro_rata']:.0f} in total)", font=dict(color=INK)))
+    fig.update_yaxes(range=[0, 28])
+    st.plotly_chart(style(fig, 320, "Targets short of demand").update_layout(legend_y=-0.2), width="stretch")
+    st.caption("A target runs short when that week's actual demand exceeds what it was allocated. With supply at 90% of forecast "
+               "some shortfalls are unavoidable; the LP puts them where they cost the least revenue.")
+
     with st.expander("Item-level safety stock (week 1, 95% cycle service level)"):
+        st.caption("Calculated per item from its forecast range, separately from the department-level allocation above: "
+                   "the stock each item needs on hand to meet demand 95% of the time.")
         safety = load("safety_stock")
         query = st.text_input("Filter items", placeholder="e.g. FOODS_3_090")
         view = safety[safety["series_id"].str.contains(query, case=False, regex=False)] if query else safety
