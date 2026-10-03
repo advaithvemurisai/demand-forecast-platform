@@ -109,12 +109,16 @@ def scopes(result: dict) -> dict[str, dict[str, np.ndarray]]:
     return {"all": result["kpis"], **result.get("kpis_by", {})}
 
 
-def validation_rows(fold: str, inp: FoldInputs, tcfg: TwinConfig, policies, reps: int, score_paths: np.ndarray, seed: int) -> list[dict]:
-    """Predicted KPI band (sampled demand) vs the realised KPI (replayed actual demand), for the network and each store."""
+def validation_rows(fold: str, inp: FoldInputs, tcfg: TwinConfig, policies, reps: int, score_paths: np.ndarray, seed: int,
+                    replay_seed: int | None = None) -> list[dict]:
+    """Predicted KPI band (sampled demand) vs the realised KPI (replayed actual demand), for the network and each store.
+
+    ``replay_seed`` fixes the supplier lead-time draws of the realised replay, so it can match the other replays of a window.
+    """
     rows = []
     for policy in policies:
         predicted = scopes(run_sim(inp, None, tcfg, policy, reps, seed, score_paths, by_store=True))
-        realised = scopes(run_sim(inp, None, tcfg, policy, 1, seed, None, replay=True, by_store=True))
+        realised = scopes(run_sim(inp, None, tcfg, policy, 1, seed if replay_seed is None else replay_seed, None, replay=True, by_store=True))
         for scope, pred in predicted.items():
             for metric in REPORT:
                 mean, lower, upper = _band(pred[metric])

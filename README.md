@@ -130,7 +130,7 @@ How the warehouse shares a short product barely matters: by days of cover, propo
 - **Backtests, then a holdout.** Three rolling 28-day backtests, then a final 28-day holdout. Model and reconciliation choices use backtests only.
 - **Decision-level accuracy.** Forecasts are also scored over each product's replenishment window, with bias by weekday and event days and a tracking-signal list of products the forecast keeps missing in one direction.
 - **Allocation backtest.** Weekly allocations are scored on realised sales, with stores carrying stock from week to week, and reported with a 95% confidence interval.
-- **Tests.** 109 Python tests, including closed-form newsvendor checks, unit conservation, every planner response and a full synthetic pipeline run. 16 web tests, including the Pyodide/CPython parity check. CI runs everything on every push.
+- **Tests.** 110 Python tests, including closed-form newsvendor checks, unit conservation, every planner response and a full synthetic pipeline run. 16 web tests, including the Pyodide/CPython parity check. CI runs everything on every push.
 
 ## Repository layout
 

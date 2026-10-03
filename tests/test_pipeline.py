@@ -146,6 +146,23 @@ def test_pipeline_twin_phase_writes_validated_tables(synthetic_root):
     assert 0 <= summary["twin"]["typical_miss"]["fill_rate"] <= 1
 
 
+def test_every_replay_of_a_window_uses_one_seed(synthetic_root, monkeypatch):
+    """Health, policy curve, timeline and validation replays of a window must draw the same supplier lead times,
+    so the pages quote one lost-sales figure for what actually sold."""
+    from forecasting import twin_runs
+    seeds: dict[str, set[int]] = {}
+    real = twin_runs.run_sim
+
+    def recording(inp, rows, tcfg, policy, reps, seed, score_paths, *args, replay=False, **kwargs):
+        if replay:
+            seeds.setdefault(str(inp.dates[-1]), set()).add(seed)
+        return real(inp, rows, tcfg, policy, reps, seed, score_paths, *args, replay=replay, **kwargs)
+
+    monkeypatch.setattr(twin_runs, "run_sim", recording)
+    run(Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False, twin_reps=4))
+    assert seeds and all(len(used) == 1 for used in seeds.values()), seeds
+
+
 def test_replay_scores_weekly_cycle_and_stability(synthetic_root):
     from forecasting.replay import run_replay
 

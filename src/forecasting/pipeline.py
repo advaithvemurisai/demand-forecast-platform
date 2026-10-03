@@ -367,25 +367,27 @@ def twin_phase(cfg: Config, keys: pd.DataFrame, folds: dict, evaluated: list[str
         return twin_runs.FoldInputs(keys, state["history_bottom"], serve_bottom, actual, np.ones(n), safety, review, price, state["dates"],
                                     past_actual, past_forecast, cost=price * (1 - margin), holding=holding)
 
+    # Every replay of what actually sold draws the same supplier lead times, so the pages quote one set of replay numbers.
+    replay_seed = 400
     validation = []
     for index, fold in enumerate(evaluated):
         if index == 0:
             continue  # nothing earlier to calibrate on
         inp = inputs(folds[fold], protect_snaps[index], folds[fold]["actual_bottom"], index)
-        validation += twin_runs.validation_rows(fold, inp, tcfg, twin_runs.POLICY_LABELS, cfg.twin_reps, None, seed=100 * index)
+        validation += twin_runs.validation_rows(fold, inp, tcfg, twin_runs.POLICY_LABELS, cfg.twin_reps, None, seed=100 * index, replay_seed=replay_seed)
     last = len(evaluated) - 1
     holdout = inputs(folds[evaluated[last]], protect_snaps[last], folds[evaluated[last]]["actual_bottom"], last)
-    timeline = twin_runs.timeline_frame(holdout, tcfg, "forecast_reorder", seed=7)
+    timeline = twin_runs.timeline_frame(holdout, tcfg, "forecast_reorder", seed=replay_seed)
     state_h, snap_h = folds[evaluated[last]], protect_snaps[last]
     safety_for = lambda level: item_safety_stock(cfg, keys, state_h, state_h["reconciled"][served_method][1], snap_h, service_override=level)["safety_stock"].to_numpy()
     assumptions = twin_runs.lost_sale_assumptions(lost_sales_bias(validation))
     frontier = twin_runs.frontier_frame(holdout, tcfg, safety_for, holdout.safety, cfg.twin_reps, None, seed=300, assumptions=assumptions)
     velocity = np.array([label.split("|")[0] for label in state_h["segments"]["item"]])
     frontier_speed = twin_runs.frontier_frame(holdout, tcfg, safety_for, holdout.safety, cfg.twin_reps, None, seed=300, assumptions=assumptions, groups=velocity)
-    curve = twin_runs.policy_curve_frame(holdout, tcfg, seed=400)
+    curve = twin_runs.policy_curve_frame(holdout, tcfg, seed=replay_seed)
     stress = twin_runs.stress_frame(holdout, tcfg, twin_runs.POLICY_LABELS, cfg.twin_reps, None, seed=500)
     responses = twin_runs.response_frame(holdout, tcfg, cfg.twin_reps, None, seed=500, lost_scale=assumptions[twin_runs.DEFAULT_ASSUMPTION]["scale"])
-    health = twin_runs.health_frame(holdout, tcfg, seed=7, velocity=velocity)
+    health = twin_runs.health_frame(holdout, tcfg, seed=replay_seed, velocity=velocity)
     production = inputs(folds["production"], protect, None, len(evaluated))
     exceptions = twin_runs.exceptions_frame(production, tcfg, "forecast_reorder", cfg.twin_reps, None, seed=700)
     write_twin_inputs(cfg, keys, production, folds["production"], protect)
