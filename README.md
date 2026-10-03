@@ -1,6 +1,6 @@
 # Hierarchical Demand Forecasting, Allocation and Inventory Twin
 
-**[▶ Live app](https://demand-forecast-platform.vercel.app/)**: forecasts, allocation and an inventory simulator that runs in your browser · [original Streamlit dashboard](https://advaithvemurisai-demand-forecast-platform-dashboardapp-wh5iys.streamlit.app/)
+**[▶ Live app](https://demand-forecast-platform.vercel.app/)**: forecasts, allocation and an inventory simulator that runs in your browser
 
 ## The business problem
 
@@ -83,7 +83,7 @@ flowchart LR
 - **Intervals:** split-conformal, calibrated separately per segment (Mondrian: items by speed class and category, departments by category), out-of-sample.
 - **Allocation:** each week one warehouse supplies the 4 stores with 90% of forecast demand, a simulated shortage. An optimisation model splits it across 28 department × store targets, maximising expected *margin* (assumed by category) over demand scenarios, with every target held to at least half its forecast so none is starved. Over 12 test weeks it earned more than a proportional split in 11, a mean +$2.7k per week (95% CI $1.2k to $4.1k), and left 7.7% less revenue unfilled, while fulfilling 0.9% fewer units: it favours margin over unit count.
 - **Decision-grain accuracy:** forecasts are also scored over each product's replenishment window, with bias by weekday, event days, and a tracking-signal exceptions list of products the forecast keeps missing in one direction.
-- **Delivery:** a static React app ([`web/`](web/)), a FastAPI service ([`api/`](api/)), a Streamlit dashboard, Tableau / Looker Studio exports, and MLflow run tracking.
+- **Delivery:** a static React app ([`web/`](web/)), a FastAPI service ([`api/`](api/)), Tableau / Looker Studio exports, and MLflow run tracking.
 
 ## Honest limitations
 
@@ -113,7 +113,6 @@ cd web && npm install && npm run dev                 # or: npm test, npm run bui
 
 # API
 DATA_DIR=data/dashboard uvicorn api.main:app         # /docs for the OpenAPI page
-streamlit run dashboard/app.py                       # the original Streamlit dashboard
 ```
 
 Useful flags: `--no-twin`, `--temporal`, `--max-items 300 --no-prophet --no-mlflow` for a 3-minute smoke run.
@@ -124,4 +123,4 @@ Useful flags: `--no-twin`, `--temporal`, `--max-items 300 --no-prophet --no-mlfl
 - **API (optional):** [`api/requirements.txt`](api/requirements.txt) is the slim install (no modelling stack). Set `DATA_DIR=data/dashboard`, `ALLOWED_ORIGINS`, and `TRUSTED_PROXY_HOPS` when behind a proxy. `POST /twin/simulate` is capped (≤50 futures, one store) and rate-limited.
 - **CI:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the Python tests, checks the browser snapshot is current, builds the web data, then lints, tests and builds the web app.
 
-The Streamlit dashboard reads the same extract in `data/dashboard/`. See [tableau/README.md](tableau/README.md) and [looker_studio/](looker_studio/) for the BI versions.
+The web app and the API read the committed extract in `data/dashboard/`. See [tableau/README.md](tableau/README.md) and [looker_studio/](looker_studio/) for the BI versions.

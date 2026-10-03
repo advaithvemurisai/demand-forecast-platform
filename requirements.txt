@@ -15,5 +15,4 @@ certifi
 kaggle>=1.6
 pytest>=7.4
 httpx>=0.25
-streamlit>=1.40
-plotly>=5.20
+matplotlib>=3.7  # walkthrough notebook

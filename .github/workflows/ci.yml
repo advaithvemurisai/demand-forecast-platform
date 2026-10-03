@@ -13,7 +13,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: sudo apt-get update && sudo apt-get install -y libgomp1
-      - run: pip install -e ".[api,dashboard,dev]"
+      - run: pip install -e ".[api,dev]"
       - run: python -m pytest -q
       - name: Browser snapshot is current
         run: python scripts/make_twin_snapshot.py && git diff --exit-code web/src/twin/fixtures/snapshot.json

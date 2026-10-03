@@ -25,11 +25,11 @@ DASHBOARD_TABLES = (
 
 
 def export_dashboard_extract(gold_dir: str | Path, output_dir: str | Path) -> dict[str, int]:
-    """Compact copy of the gold layer for the Streamlit app and Looker Studio.
+    """Compact copy of the gold layer for the web app, the API and Looker Studio.
 
     Keeps every small table as-is, the served production forecast with intervals
     (all nodes), and the item-level safety stock, all small enough to version in git
-    so a hosted dashboard works without rerunning the pipeline.
+    so the hosted app works without rerunning the pipeline.
     """
     import json
 
