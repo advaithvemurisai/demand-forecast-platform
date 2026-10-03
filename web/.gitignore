@@ -4,3 +4,5 @@ dist
 public/data
 public/py
 *.tsbuildinfo
+# Throwaway virtualenv created by `npm run build:vercel`
+.pyenv

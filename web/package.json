@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
-    "build:vercel": "python3 -m pip install --quiet numpy pandas pyarrow && python3 ../scripts/build_web_data.py && npm run build"
+    "build:vercel": "python3 -m venv .pyenv && .pyenv/bin/pip install --quiet numpy pandas pyarrow && .pyenv/bin/python ../scripts/build_web_data.py && npm run build"
   },
   "dependencies": {
     "react": "^18.3.1",
