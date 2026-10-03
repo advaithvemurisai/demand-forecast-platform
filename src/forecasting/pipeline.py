@@ -347,6 +347,9 @@ def twin_phase(cfg: Config, keys: pd.DataFrame, folds: dict, evaluated: list[str
     keys = keys.reset_index(drop=True)
     tcfg = TwinConfig(lead_time_days=cfg.lead_time_days, presentation_min=cfg.presentation_min, case_pack=cfg.case_pack, seed=0)
     review = protection_days(keys, cfg) - cfg.lead_time_days
+    category = keys["cat_id"].astype(str)
+    margin = category.map(cfg.margin_by_category).fillna(np.mean(list(cfg.margin_by_category.values()))).to_numpy()
+    holding = category.map(cfg.holding_by_category).fillna(0.005).to_numpy()
 
     def past(upto: int) -> tuple[np.ndarray, np.ndarray]:
         """What sold and what was forecast in the first ``upto`` windows: the history the demand bootstrap resamples."""
@@ -360,7 +363,9 @@ def twin_phase(cfg: Config, keys: pd.DataFrame, folds: dict, evaluated: list[str
         units = state["history_bottom"][:, -28:].sum(axis=1)
         price = np.divide(state["scaling"][3], units, out=np.zeros(n), where=units > 0)
         price = np.where(price > 0, price, np.median(price[price > 0]) if (price > 0).any() else 1.0)
-        return twin_runs.FoldInputs(keys, state["history_bottom"], serve_bottom, actual, np.ones(n), safety, review, price, state["dates"], *past(upto))
+        past_actual, past_forecast = past(upto)
+        return twin_runs.FoldInputs(keys, state["history_bottom"], serve_bottom, actual, np.ones(n), safety, review, price, state["dates"],
+                                    past_actual, past_forecast, cost=price * (1 - margin), holding=holding)
 
     validation = []
     for index, fold in enumerate(evaluated):
@@ -373,62 +378,85 @@ def twin_phase(cfg: Config, keys: pd.DataFrame, folds: dict, evaluated: list[str
     timeline = twin_runs.timeline_frame(holdout, tcfg, "forecast_reorder", seed=7)
     state_h, snap_h = folds[evaluated[last]], protect_snaps[last]
     safety_for = lambda level: item_safety_stock(cfg, keys, state_h, state_h["reconciled"][served_method][1], snap_h, service_override=level)["safety_stock"].to_numpy()
-    frontier = twin_runs.frontier_frame(holdout, tcfg, safety_for, holdout.safety, cfg.margin_by_category, cfg.holding_by_category, cfg.twin_reps, None, seed=300)
+    frontier = twin_runs.frontier_frame(holdout, tcfg, safety_for, holdout.safety, cfg.twin_reps, None, seed=300)
+    curve = twin_runs.policy_curve_frame(holdout, tcfg, seed=400)
     stress = twin_runs.stress_frame(holdout, tcfg, twin_runs.POLICY_LABELS, cfg.twin_reps, None, seed=500)
     production = inputs(folds["production"], protect, None, len(evaluated))
-    exceptions = twin_runs.exceptions_frame(production, tcfg, "last_week_reorder", cfg.twin_reps, None, seed=700)
+    exceptions = twin_runs.exceptions_frame(production, tcfg, "forecast_reorder", cfg.twin_reps, None, seed=700)
     write_twin_inputs(cfg, keys, production, folds["production"], protect)
     return {
-        "twin_validation": pd.DataFrame(validation), "twin_timeline": timeline, "twin_frontier": frontier,
+        "twin_validation": pd.DataFrame(validation), "twin_timeline": timeline, "twin_frontier": frontier, "twin_policy_curve": curve,
         "twin_stress": stress, "twin_exceptions": exceptions,
     }
 
 
 def write_twin_inputs(cfg: Config, keys: pd.DataFrame, production, state: dict, protect: dict) -> None:
-    """Per-store input bundles for what-if runs (API, build script, browser): the production window's forecast and calibration."""
+    """The production window's inputs for what-if runs (API, build script, browser): one bundle for the whole network,
+    since every store draws on the same DC."""
     out = cfg.root / "data" / "dashboard" / "twin_inputs"
     out.mkdir(parents=True, exist_ok=True)
+    for stale in out.glob("*.npz"):
+        stale.unlink()
     served = production.forecast
     by_service = np.stack([
         item_safety_stock(cfg, keys, state, served, protect, service_override=level)["safety_stock"].to_numpy() for level in twin_runs.SERVICE_GRID
     ], axis=1).astype("float32")
-    store = keys["store_id"].astype(str).to_numpy()
-    for name in sorted(set(store)):
-        rows = np.flatnonzero(store == name)
-        np.savez_compressed(
-            out / f"{name}.npz",
-            forecast=served[rows].astype("float32"), history=production.history[rows][:, -28:].astype("float32"),
-            scale=production.scale[rows].astype("float32"), current_safety=production.safety[rows].astype("float32"),
-            safety_by_service=by_service[rows], review=production.review[rows].astype("int8"), price=production.price[rows].astype("float32"),
-            past_actual=production.past_actual[rows].astype("float16"), past_forecast=production.past_forecast[rows].astype("float16"), dept_ids=keys["dept_id"].astype(str).to_numpy().astype("U16")[rows], cat_ids=keys["cat_id"].astype(str).to_numpy().astype("U16")[rows],
-            item_ids=keys["item_id"].astype(str).to_numpy().astype("U24")[rows], dates=production.dates.strftime("%Y-%m-%d").to_numpy().astype("U10"),
-            lead_time_days=np.int8(cfg.lead_time_days), presentation_min=np.float32(cfg.presentation_min), case_pack=np.int8(cfg.case_pack),
-        )
+    text = lambda column, width: keys[column].astype(str).to_numpy().astype(f"U{width}")
+    np.savez_compressed(
+        out / "network.npz",
+        forecast=served.astype("float32"), history=production.history[:, -28:].astype("float32"),
+        scale=production.scale.astype("float32"), current_safety=production.safety.astype("float32"),
+        safety_by_service=by_service, review=production.review.astype("int8"), price=production.price.astype("float32"),
+        cost=production.cost.astype("float32"), holding_rate=production.holding.astype("float32"),
+        past_actual=production.past_actual.astype("float16"), past_forecast=production.past_forecast.astype("float16"),
+        dept_ids=text("dept_id", 16), cat_ids=text("cat_id", 16), store_ids=text("store_id", 8), item_ids=text("item_id", 24),
+        dates=production.dates.strftime("%Y-%m-%d").to_numpy().astype("U10"),
+        lead_time_days=np.int8(cfg.lead_time_days), presentation_min=np.float32(cfg.presentation_min), case_pack=np.int8(cfg.case_pack),
+    )
 
 
 def twin_summary(tables: dict[str, pd.DataFrame]) -> dict[str, object]:
-    """Headline twin numbers for the run summary, README and drift check."""
+    """Headline twin numbers for the run summary, README, web app and drift check."""
     validation = tables["twin_validation"]
     network = validation[(validation["store_id"] == "all") & (validation["policy"] == "forecast_reorder")]
     latest = network[network["fold"] == network["fold"].iloc[-1]].set_index("metric")
     frontier = tables["twin_frontier"]
     stress = tables["twin_stress"]
-    lost = stress[(stress["metric"] == "lost_sales_value") & (stress["policy"] == "forecast_reorder")].set_index("scenario")["delta"]
+    standard = stress[(stress["policy"] == "forecast_reorder") & (stress["rationing"] == "days_of_cover")]
+    lost = standard[standard["metric"] == "lost_sales_value"].set_index("scenario")
     error = (network["predicted"] - network["realised"]).abs()
     miss = {
-        metric: float(error[network["metric"] == metric].mean() / (1 if metric in ("fill_rate", "in_stock_pct") else network.loc[network["metric"] == metric, "realised"].abs().mean()))
+        metric: float(error[network["metric"] == metric].mean() / (1 if metric in ("fill_rate", "in_stock_pct") else max(network.loc[network["metric"] == metric, "realised"].abs().mean(), 1e-9)))
         for metric in network["metric"].unique()
     }
+    stores = validation[(validation["store_id"] != "all") & (validation["policy"] == "forecast_reorder")]
+    current = frontier[frontier["service_level"].isna()].set_index("category")
+    recommended = frontier[frontier["recommended"]].set_index("category")
+    curve = tables.get("twin_policy_curve")
+    # The realised holdout trade-off: what the forecast policy buys over current practice, and what the extra stock costs.
+    holdout = validation[(validation["fold"] == validation["fold"].iloc[-1]) & (validation["store_id"] == "all")]
+    realised = holdout.pivot(index="metric", columns="policy", values="realised")
+    trade = {metric: float(realised.loc[metric, "forecast_reorder"] - realised.loc[metric, "last_week_reorder"]) for metric in realised.index}
     return {
         "validation_fold": str(network["fold"].iloc[-1]),
         "fill_rate": {"predicted": float(latest.loc["fill_rate", "predicted"]), "realised": float(latest.loc["fill_rate", "realised"]),
                       "lower": float(latest.loc["fill_rate", "lower"]), "upper": float(latest.loc["fill_rate", "upper"])},
         "share_realised_in_band": float(network["in_band"].mean()),
+        "share_realised_in_band_stores": float(stores["in_band"].mean()) if len(stores) else None,
         # Mean absolute miss across windows: points for rates, share of the realised value otherwise.
         "typical_miss": miss,
         "fill_rate_gap": float(abs(latest.loc["fill_rate", "predicted"] - latest.loc["fill_rate", "realised"])),
-        "recommended_service": {row.category: float(row.service_level) for row in frontier[frontier["recommended"]].itertuples()},
-        "stress_added_lost_sales": {name: float(value) for name, value in lost.items()},
+        "recommended_service": {category: float(row.service_level) for category, row in recommended.iterrows()},
+        "service_at_grid_edge": [str(category) for category, row in recommended.iterrows() if row["at_grid_edge"]],
+        "service_saving": {
+            category: {"saving": float(row["saving_vs_current"]), "lower": float(row["saving_lower"]), "upper": float(row["saving_upper"]), "clear": bool(row["clear_saving"])}
+            for category, row in recommended.iterrows()
+        },
+        "current_service_cost": {category: float(row["total_cost"]) for category, row in current.iterrows()},
+        "stress_added_lost_sales": {name: float(value) for name, value in lost["delta"].items()},
+        "stress_added_lost_sales_band": {name: [float(row["delta_lower"]), float(row["delta_upper"])] for name, row in lost.iterrows()},
+        "holdout_tradeoff": trade,
+        "equal_inventory": twin_runs.equal_inventory(curve) if curve is not None and len(curve) else None,
     }
 
 
@@ -698,6 +726,7 @@ def run(cfg: Config) -> dict[str, object]:
         twin_started = time.time()
         outputs.update(twin_phase(cfg, keys, folds, evaluated, daily_scores, protect_snaps, protect, served_method))
         twin_info = twin_summary(outputs)
+        outputs["allocation"] = allocation_from_twin(cfg, nodes, rows_by_level, folds["production"], weekly_scores, weights, served_method, outputs["twin_timeline"])
         if twin_info["fill_rate_gap"] > 0.05:  # the twin no longer matches reality: recalibrate before trusting what-ifs
             drift = outputs["drift"]
             reason = f"twin fill-rate gap {twin_info['fill_rate_gap']:.1%} vs realised"
@@ -734,34 +763,88 @@ def margin_weights(price: pd.Series, cfg: Config) -> pd.Series:
 def evaluate_allocation(fold, dept_nodes, forecast_week, actual_week, scale, prior_scores, weights, cfg, node_log: list | None = None) -> list[dict]:
     """Allocate a constrained weekly supply with the LP and a pro-rata rule; score against actuals.
 
-    The LP maximises expected *margin* with every node held to at least ``cfg.min_fill`` of its
-    forecast. Results are in units and dollars lost, not just a count of short nodes.
+    Stores carry stock from week to week (each policy its own), starting the fold with a week's safety stock. Each week
+    the warehouse can ship ``cfg.supply_ratio`` of the week's forecast demand, and both rules allocate against *net*
+    need: forecast plus safety stock minus what the store already holds. The LP maximises expected *margin* with every
+    node's stock held to at least ``cfg.min_fill`` of its forecast; pro-rata splits supply in proportion to net need.
+    Results are in units and dollars lost, not just a count of short nodes.
     """
     rows = []
     price = weights.reindex(dept_nodes["node_id"])
     unit_value = price.to_numpy()
     margin = margin_weights(price, cfg).to_numpy()
+    held = {}
     for week in range(forecast_week.shape[1]):
         demand = pd.DataFrame({"node_id": dept_nodes["node_id"].to_numpy(), "forecast": forecast_week[:, week], "unit_value": unit_value, "margin_value": margin})
+        safety = prob.service_level_safety_stock(demand["forecast"].to_numpy(), prior_scores, cfg.service_level, scale)["safety_stock"].to_numpy()
         supply = cfg.supply_ratio * demand["forecast"].sum()
         scenarios = prob.demand_scenarios(demand["forecast"], prior_scores, scale, cfg.n_scenarios)
-        lp = allocate_inventory(demand, supply, scenarios, value_column="margin_value", min_fill=cfg.min_fill)["allocated_quantity"].to_numpy()
-        pro_rata = proportional_allocation(demand, supply)
         actual = actual_week[:, week]
-        for policy, allocated in (("lp_scenario", lp), ("pro_rata", pro_rata)):
-            sold = np.minimum(actual, allocated)
+        for policy in ("lp_scenario", "pro_rata"):
+            on_hand = held.get(policy, safety)
+            need = demand["forecast"].to_numpy() + safety - on_hand
+            if policy == "lp_scenario":
+                allocated = allocate_inventory(demand, supply, scenarios, value_column="margin_value", min_fill=cfg.min_fill, on_hand=on_hand)["allocated_quantity"].to_numpy()
+            else:
+                allocated = proportional_allocation(demand, supply, need=need)
+            stock = on_hand + allocated
+            sold = np.minimum(actual, stock)
+            held[policy] = stock - sold
             node_fill = np.divide(sold, actual, out=np.ones(len(actual)), where=actual > 0)
             rows.append({
                 "fold": fold, "week": week + 1, "policy": policy, "supply": supply,
                 "units_fulfilled": sold.sum(), "units_demanded": actual.sum(),
                 "fill_rate": sold.sum() / actual.sum(), "revenue_fulfilled": float((sold * unit_value).sum()),
                 "units_lost": float((actual - sold).sum()), "lost_revenue": float(((actual - sold) * unit_value).sum()),
+                "margin_fulfilled": float((sold * margin).sum()),
+                "start_stock": float(on_hand.sum()), "end_stock": float(held[policy].sum()),
                 "min_node_fill": float(node_fill.min()),
-                "stockout_nodes": int((actual > allocated + 1e-9).sum()),
+                "stockout_nodes": int((actual > stock + 1e-9).sum()),
             })
             if node_log is not None:
                 node_log.extend({"fold": fold, "week": week + 1, "policy": policy, "node_id": node, "fill_rate": float(fill)} for node, fill in zip(demand["node_id"], node_fill))
     return rows
+
+
+def allocation_from_twin(cfg: Config, nodes, rows_by_level, production: dict, weekly_scores: dict, weights: pd.Series, served_method: str, timeline: pd.DataFrame) -> pd.DataFrame:
+    """Production allocation whose starting store stock is the twin's on-hand at the end of the replayed holdout,
+    which ends the day before the production window starts."""
+    dept_rows = rows_by_level["department"]
+    dept_nodes = nodes.iloc[dept_rows]
+    last = timeline[timeline["date"] == timeline["date"].max()]
+    stock = last.assign(node_id=make_node_ids("department", last[["dept_id", "store_id"]]).to_numpy()).set_index("node_id")["on_hand"]
+    on_hand = stock.reindex(dept_nodes["node_id"]).to_numpy()
+    serve_agg = production["reconciled"][served_method][0]
+    return production_allocation(cfg, dept_nodes, weekly(serve_agg[dept_rows])[:, 0], np.concatenate(weekly_scores["department"]), production["week_scale_dept"], weights,
+                                 production["dates"], on_hand=np.nan_to_num(on_hand), on_hand_source="twin replay of the holdout window")
+
+
+def production_allocation(cfg: Config, dept_nodes: pd.DataFrame, week_forecast: np.ndarray, dept_scores: np.ndarray, week_scale: np.ndarray, weights: pd.Series,
+                          dates: pd.DatetimeIndex, on_hand: np.ndarray | None = None, on_hand_source: str = "safety stock (assumed)") -> pd.DataFrame:
+    """Next week's allocation of a short supply across store x department, against net need.
+
+    ``on_hand`` is each node's stock at the start of the week; the twin supplies it from its replay of the window just
+    ended, otherwise each node is assumed to hold its safety stock.
+    """
+    price = weights.reindex(dept_nodes["node_id"])
+    demand = pd.DataFrame({"node_id": dept_nodes["node_id"].to_numpy(), "forecast": week_forecast, "unit_value": price.to_numpy(), "margin_value": margin_weights(price, cfg).to_numpy()})
+    parts = demand["node_id"].str.extract(r"dept_id=(?P<dept_id>[^|]+)\|store_id=(?P<store_id>.+)")
+    demand = pd.concat([demand, parts], axis=1)
+    ss = prob.service_level_safety_stock(week_forecast, dept_scores, cfg.service_level, week_scale)
+    safety = ss["safety_stock"].to_numpy()
+    held = safety if on_hand is None else np.asarray(on_hand, dtype=float)
+    need = np.maximum(demand["forecast"].to_numpy() + safety - held, 0)
+    supply = cfg.supply_ratio * need.sum()  # the warehouse can cover this share of what the stores need
+    scenarios = prob.demand_scenarios(demand["forecast"], dept_scores, week_scale, cfg.n_scenarios)
+    allocation = allocate_inventory(demand, supply, scenarios, value_column="margin_value", min_fill=cfg.min_fill, on_hand=held)
+    allocation["on_hand"] = held
+    allocation["net_need"] = need
+    allocation["pro_rata_quantity"] = proportional_allocation(demand, supply, need=need)
+    allocation["on_hand_source"] = on_hand_source
+    allocation["supply"] = supply
+    allocation["week_start"] = dates[0]
+    allocation["safety_stock"], allocation["order_up_to"] = safety, ss["order_up_to"].to_numpy()
+    return allocation
 
 
 def long_forecasts(nodes: pd.DataFrame, values: np.ndarray, dates: pd.DatetimeIndex, fold: str, method: str, actual: np.ndarray | None = None) -> pd.DataFrame:
@@ -813,21 +896,7 @@ def build_gold(cfg, keys, nodes, rows_by_level, production, daily_scores, weekly
     safety["week_start"] = dates[0]
 
     dept_rows = rows_by_level["department"]
-    dept_nodes = nodes.iloc[dept_rows]
-    week_forecast = weekly(serve_agg[dept_rows])[:, 0]
-    dept_scores = np.concatenate(weekly_scores["department"])
-    price = weights.reindex(dept_nodes["node_id"])
-    demand = pd.DataFrame({"node_id": dept_nodes["node_id"].to_numpy(), "forecast": week_forecast, "unit_value": price.to_numpy(), "margin_value": margin_weights(price, cfg).to_numpy()})
-    parts = demand["node_id"].str.extract(r"dept_id=(?P<dept_id>[^|]+)\|store_id=(?P<store_id>.+)")
-    demand = pd.concat([demand, parts], axis=1)
-    supply = cfg.supply_ratio * demand["forecast"].sum()
-    scenarios = prob.demand_scenarios(demand["forecast"], dept_scores, production["week_scale_dept"], cfg.n_scenarios)
-    allocation = allocate_inventory(demand, supply, scenarios, value_column="margin_value", min_fill=cfg.min_fill)
-    allocation["pro_rata_quantity"] = proportional_allocation(demand, supply)
-    allocation["supply"] = supply
-    allocation["week_start"] = dates[0]
-    ss = prob.service_level_safety_stock(week_forecast, dept_scores, cfg.service_level, production["week_scale_dept"])
-    allocation["safety_stock"], allocation["order_up_to"] = ss["safety_stock"].to_numpy(), ss["order_up_to"].to_numpy()
+    allocation = production_allocation(cfg, nodes.iloc[dept_rows], weekly(serve_agg[dept_rows])[:, 0], np.concatenate(weekly_scores["department"]), production["week_scale_dept"], weights, dates)
 
     drift = drift_table(nodes, keys, production, daily_scores["item"])
     recon = pd.DataFrame(recon_rows)

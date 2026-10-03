@@ -26,16 +26,17 @@ def test_endpoints_filter_and_paginate(tmp_path, monkeypatch):
     assert client.get("/get-metrics", params={"table": "nope"}).status_code == 404
 
 
-def _write_bundle(directory, store="CA_1", n=30):
+def _write_bundle(directory, n=30):
     import numpy as np
 
     rng = np.random.default_rng(0)
     forecast = np.tile(rng.uniform(1, 6, (n, 1)), (1, 28)).astype("float32")
     np.savez_compressed(
-        directory / f"{store}.npz", forecast=forecast, history=rng.poisson(3, (n, 28)).astype("float32"), scale=np.maximum(forecast[:, 0], 1),
-        current_safety=np.full(n, 3.0, dtype="float32"), safety_by_service=np.tile(np.linspace(1, 6, 6, dtype="float32"), (n, 1)),
+        directory / "network.npz", forecast=forecast, history=rng.poisson(3, (n, 28)).astype("float32"), scale=np.maximum(forecast[:, 0], 1),
+        current_safety=np.full(n, 3.0, dtype="float32"), safety_by_service=np.tile(np.linspace(1, 6, 8, dtype="float32"), (n, 1)),
         review=np.full(n, 3, dtype="int8"), price=np.ones(n, dtype="float32"), score_paths=rng.normal(0, 1, (300, 28)).astype("float16"),
         dept_ids=np.array(["FOODS_1"] * n), cat_ids=np.array(["FOODS"] * n),
+        store_ids=np.array(["CA_1", "CA_2"] * (n // 2)), item_ids=np.repeat(np.array([f"FOODS_1_{i:03d}" for i in range(n // 2)]), 2),
     )
 
 
@@ -51,12 +52,13 @@ def test_api_boots_on_dashboard_extract_alone_and_serves_twin(tmp_path, monkeypa
     api_main._hits.clear()
     client = TestClient(api_main.app)
 
-    assert client.get("/health").json()["twin_stores"] == ["CA_1"]
+    assert client.get("/health").json()["twin_stores"] == ["CA_1", "CA_2"]
     assert client.get("/twin/tables/twin_validation").json()["records"][0]["predicted"] == 0.97
     assert client.get("/twin/tables/not_a_table").status_code == 404
     spike = {"store_id": "CA_1", "reps": 6, "scenario": {"demand_scale": 1.8, "category": "FOODS", "days": [5, 12]}}
     body = client.post("/twin/simulate", json=spike).json()
-    assert body["scenario"]["kpis"]["lost_sales_value"]["mean"] >= body["baseline"]["kpis"]["lost_sales_value"]["mean"]
+    assert body["scenario"]["kpis"]["all"]["lost_sales_value"]["mean"] >= body["baseline"]["kpis"]["all"]["lost_sales_value"]["mean"]
+    assert set(body["baseline"]["kpis"]) == {"all", "CA_1", "CA_2"}
     assert client.post("/twin/simulate", json=spike).json() == body  # cached and deterministic
     assert client.post("/twin/simulate", json={"store_id": "CA_9"}).status_code == 404
 

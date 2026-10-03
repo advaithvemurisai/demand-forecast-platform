@@ -33,8 +33,10 @@ export default function Allocation() {
           <>
             <Question>when the warehouse can’t cover every store’s demand, who gets the stock?</Question>
             <p>
-              <strong>Week of {allocation[0].week_start}.</strong> The DC holds {num(allocation[0].supply)} units (90% of forecast demand). The scenario LP maximises expected
-              <em> margin</em> over conformal demand scenarios, with every department held to at least half of its forecast. “Pro-rata” splits supply in proportion to the point forecast.
+              <strong>Week of {allocation[0].week_start}.</strong> The warehouse can ship {num(allocation[0].supply)} units, 90% of the week’s forecast demand. Both rules allocate against
+              <em> net need</em>: forecast plus safety stock, minus what each store already holds
+              {allocation[0].on_hand_source ? <> (starting stock from the {allocation[0].on_hand_source})</> : null}. The scenario LP maximises expected <em>margin</em> over conformal demand
+              scenarios, with every department’s stock held to at least half its forecast; “pro-rata” splits supply in proportion to net need.
             </p>
             <div className="controls"><Segmented label="Store" value={store} options={stores.map((s) => ({ value: s, label: s }))} onChange={setStore} /></div>
             <ChartBox size="tall">
@@ -46,10 +48,14 @@ export default function Allocation() {
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="allocated_quantity" name="Scenario LP" fill={SERIES[0]} isAnimationActive={false} />
                 <Bar dataKey="pro_rata_quantity" name="Pro-rata" fill={SERIES[1]} isAnimationActive={false} />
+                {rows.some((r) => r.on_hand !== undefined) && <Bar dataKey="on_hand" name="Already in store" fill="var(--grid)" isAnimationActive={false} />}
                 <Line dataKey="forecast" name="Forecast demand" stroke="var(--ink)" strokeWidth={0} dot={{ r: 5, fill: 'var(--ink)' }} isAnimationActive={false} />
               </ComposedChart>
             </ChartBox>
-            <p className="legend-note">Stock is allocated to 28 targets (7 departments × 4 stores) drawing on the same DC supply; this chart shows one store. Labels give each department’s average selling price.</p>
+            <p className="legend-note">
+              Stock is allocated to 28 targets (7 departments × 4 stores) drawing on the same warehouse supply; this chart shows one store. Labels give each department’s average selling price.
+              This is the weekly planning split by department; the <a href="#/twin?section=rationing">simulator</a> then shares each product’s stock between stores day by day.
+            </p>
 
             <h2>Backtest: optimiser vs pro-rata</h2>
             <div className="grid kpis">
@@ -68,7 +74,7 @@ export default function Allocation() {
                 <Bar dataKey="uplift" name="Revenue vs pro-rata" fill={SERIES[0]} isAnimationActive={false} />
               </BarChart>
             </ChartBox>
-            <p className="legend-note">Realised revenue fulfilled by the optimiser vs pro-rata, per week (scored on what actually sold).</p>
+            <p className="legend-note">Realised revenue fulfilled by the optimiser vs pro-rata, per week (scored on what actually sold). Stores carry unsold stock into the next week, each rule its own.</p>
             {hasLoss && (
               <>
                 <ChartBox size="short">

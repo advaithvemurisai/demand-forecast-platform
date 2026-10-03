@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { ColumnarForecast, ForecastIndex, KpiBand, Manifest, TwinPresetIndex, TwinPresets } from './types'
+import type { ColumnarForecast, ForecastIndex, KpiBand, Manifest, TwinPresetIndex } from './types'
 
 // These check the files scripts/build_web_data.py wrote. They are skipped before the data is built
 // (CI builds it first), so a fresh clone can still run `npm test`.
@@ -38,27 +38,29 @@ describe.skipIf(!existsSync(resolve(dir, 'manifest.json')))('built data contract
     for (const level of ['total', 'state', 'store', 'category', 'department']) expect(index.levels[level].length).toBeGreaterThan(0)
   })
 
-  it.skipIf(!existsSync(resolve(dir, 'twin/presets.json')))('has presets whose KPI bands and timelines are consistent', () => {
+  it.skipIf(!existsSync(resolve(dir, 'twin/presets.json')))('has network presets whose KPI bands and timelines are consistent', () => {
     const index = read<TwinPresetIndex>('twin/presets.json')
-    expect(index.stores.length).toBeGreaterThan(0)
-    const presets = read<TwinPresets>(`twin/presets/${index.stores[0]}.json`)
-    expect(presets.dates).toHaveLength(28)
+    expect(index.stores.length).toBeGreaterThan(1)
+    expect(index.dates).toHaveLength(28)
     for (const policy of index.policies) {
-      expect(presets.results[`baseline|${policy}`].scenario).toBeNull()
+      expect(index.results[`baseline|${policy}`].scenario).toBeNull()
       for (const key of Object.keys(index.presets)) {
-        const result = presets.results[`${key}|${policy}`]
+        const result = index.results[`${key}|${policy}`]
         expect(result.scenario, key).not.toBeNull()
-        const kpis = result.scenario!.kpis
-        for (const metric of ['fill_rate', 'in_stock_pct', 'lost_sales_value', 'inventory_value']) {
-          const band: KpiBand = kpis[metric]
-          expect(band.lower, metric).toBeLessThanOrEqual(band.mean + 1e-9)
-          expect(band.mean, metric).toBeLessThanOrEqual(band.upper + 1e-9)
+        expect(Object.keys(result.scenario!.kpis).sort()).toEqual(['all', ...index.stores].sort())
+        for (const scope of ['all', ...index.stores]) {
+          for (const metric of ['fill_rate', 'in_stock_pct', 'lost_sales_value', 'inventory_value']) {
+            const band: KpiBand = result.scenario!.kpis[scope][metric]
+            expect(band.lower, metric).toBeLessThanOrEqual(band.mean + 1e-9)
+            expect(band.mean, metric).toBeLessThanOrEqual(band.upper + 1e-9)
+          }
         }
         const timeline = result.scenario!.timeline
         expect(timeline.on_hand).toHaveLength(28)
-        expect(timeline.on_hand[0]).toHaveLength(timeline.dept.length)
+        expect(timeline.on_hand[0]).toHaveLength(timeline.group.length)
+        expect(timeline.group.every((group) => group.includes('|'))).toBe(true)
       }
     }
-    expect(readdirSync(resolve(dir, 'twin/inputs')).some((name) => name.endsWith('.npz'))).toBe(true)
+    expect(readdirSync(resolve(dir, 'twin')).includes('network.npz')).toBe(true)
   })
 })

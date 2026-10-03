@@ -195,7 +195,7 @@ def _bundle(n=40, seed=0):
     forecast = np.tile(rng.uniform(1, 6, (n, 1)), (1, 28)).astype(np.float32)
     return dict(
         history=rng.poisson(3, (n, 28)).astype(np.float32), forecast=forecast, scale=np.maximum(forecast[:, 0], 1),
-        current_safety=np.full(n, 3.0), safety_by_service=np.tile(np.linspace(1, 6, 6), (n, 1)), review=np.full(n, 3), price=np.ones(n),
+        current_safety=np.full(n, 3.0), safety_by_service=np.tile(np.linspace(1, 6, len(twin.SERVICE_GRID)), (n, 1)), review=np.full(n, 3), price=np.ones(n),
         score_paths=rng.normal(0, 1, (500, 28)), dept_ids=np.array(["A"] * (n // 2) + ["B"] * (n - n // 2)),
         cat_ids=np.array(["FOODS"] * (n // 2) + ["HOBBIES"] * (n - n // 2)),
     )
@@ -208,16 +208,16 @@ def test_simulate_bundle_is_json_ready_deterministic_and_shock_hurts():
     first = twin.simulate_bundle(_bundle(), {"reps": 10, "seed": 3, "scenario": spike})
     second = twin.simulate_bundle(_bundle(), {"reps": 10, "seed": 3, "scenario": spike})
     assert json.dumps(first) == json.dumps(second)
-    assert first["scenario"]["kpis"]["lost_sales_value"]["mean"] > first["baseline"]["kpis"]["lost_sales_value"]["mean"]
-    assert len(first["baseline"]["timeline"]["on_hand"]) == 28 and first["baseline"]["timeline"]["dept"] == ["A", "B"]
+    assert first["scenario"]["kpis"]["all"]["lost_sales_value"]["mean"] > first["baseline"]["kpis"]["all"]["lost_sales_value"]["mean"]
+    assert len(first["baseline"]["timeline"]["on_hand"]) == 28 and first["baseline"]["timeline"]["group"] == ["A", "B"]
 
 
 def test_simulate_bundle_caps_reps_and_validates_service():
     assert twin.simulate_bundle(_bundle(), {"reps": 5000, "seed": 1})["reps"] == 50
     with pytest.raises(ValueError):
         twin.simulate_bundle(_bundle(), {"service": 0.5})
-    high = twin.simulate_bundle(_bundle(), {"reps": 10, "service": 0.99})["baseline"]["kpis"]
-    low = twin.simulate_bundle(_bundle(), {"reps": 10, "service": 0.80})["baseline"]["kpis"]
+    high = twin.simulate_bundle(_bundle(), {"reps": 10, "service": 0.99})["baseline"]["kpis"]["all"]
+    low = twin.simulate_bundle(_bundle(), {"reps": 10, "service": 0.80})["baseline"]["kpis"]["all"]
     assert high["inventory_value"]["mean"] > low["inventory_value"]["mean"]
 
 
@@ -256,7 +256,7 @@ def test_simulate_bundle_honours_the_per_series_flag():
     bundle["score_paths"] = np.random.default_rng(2).normal(0, 1, (len(bundle["forecast"]), 56))
     bundle["score_per_series"] = np.bool_(True)
     result = twin.simulate_bundle(bundle, {"reps": 6, "seed": 2})
-    assert 0 < result["baseline"]["kpis"]["fill_rate"]["mean"] <= 1
+    assert 0 < result["baseline"]["kpis"]["all"]["fill_rate"]["mean"] <= 1
 
 
 def _past(n=400, weeks=8, seed=0, rate=2.0):
@@ -298,6 +298,96 @@ def test_simulate_bundle_uses_the_demand_bootstrap_when_history_is_supplied():
     past, past_forecast = _past(n=40, weeks=8, rate=3.0)
     bundle.update(past_actual=past, past_forecast=past_forecast)
     result = twin.simulate_bundle(bundle, {"reps": 8, "seed": 4})
-    assert 0.5 < result["baseline"]["kpis"]["fill_rate"]["mean"] <= 1
+    assert 0.5 < result["baseline"]["kpis"]["all"]["fill_rate"]["mean"] <= 1
     spike = twin.simulate_bundle(bundle, {"reps": 8, "seed": 4, "scenario": {"demand_scale": 1.6, "days": [7, 14]}})
-    assert spike["scenario"]["kpis"]["lost_sales_value"]["mean"] > spike["baseline"]["kpis"]["lost_sales_value"]["mean"]
+    assert spike["scenario"]["kpis"]["all"]["lost_sales_value"]["mean"] > spike["baseline"]["kpis"]["all"]["lost_sales_value"]["mean"]
+
+
+def test_dc_stock_is_per_product_and_shared_across_stores():
+    """Rows of the same product compete for its DC stock; one product's stock never fills another product's order."""
+    order = np.array([[10.0, 10.0, 10.0, 10.0]])
+    groups = twin.Groups.of(np.array(["a", "a", "b", "b"]))
+    available = np.array([[5.0, 100.0]])  # product a is short, product b is not
+    cover = np.array([[3.0, 1.0, 2.0, 0.5]])
+    by_cover = twin.ration(order, available, "days_of_cover", cover, np.ones(4), groups)[0]
+    np.testing.assert_allclose(by_cover, [0.0, 5.0, 10.0, 10.0])  # the a-store with less cover gets the 5 units
+    proportional = twin.ration(order, available, "proportional", cover, np.ones(4), groups)[0]
+    np.testing.assert_allclose(proportional, [2.5, 2.5, 10.0, 10.0])
+    by_value = twin.ration(order, available, "value", cover, np.array([1.0, 3.0, 1.0, 1.0]), groups)[0]
+    np.testing.assert_allclose(by_value, [0.0, 5.0, 10.0, 10.0])
+
+
+def test_network_run_shares_one_dc_and_reports_each_store():
+    rng = np.random.default_rng(8)
+    items, days = 15, 56
+    rate = np.repeat(rng.uniform(1, 5, (items, 1)), days, axis=1)
+    forecast = np.vstack([rate, rate])  # two stores selling the same products
+    demand = rng.poisson(forecast, (4, 2 * items, days)).astype(np.float32)
+    products = np.tile(np.arange(items), 2)
+    stores = np.repeat(["S1", "S2"], items)
+    cfg = twin.TwinConfig(warmup_days=14)
+    args = (demand, forecast, np.full(2 * items, 2.0), np.full(2 * items, 3), np.ones(2 * items), cfg)
+    result = twin.simulate(*args, products=products, kpi_groups=stores, shock=twin.Shock(dc_supply_factor=0.5, dc_days=(14, 56)))
+    assert result["conservation_gap"] < 1e-3 * result["flow"]["shipped"]
+    by = result["kpis_by"]
+    np.testing.assert_allclose(by["S1"]["units_lost"] + by["S2"]["units_lost"], result["kpis"]["units_lost"], rtol=1e-5)
+    np.testing.assert_allclose(by["S1"]["inventory_value"] + by["S2"]["inventory_value"], result["kpis"]["inventory_value"], rtol=1e-5)
+
+
+def test_pooled_dc_safety_is_below_the_sum_of_store_safety():
+    forecast = np.full((4, 28), 5.0)
+    products = twin.Groups.of(np.array([0, 0, 0, 0]))
+    cfg = twin.TwinConfig(supplier_lead_sd_days=0.0)
+    pooled = twin.dc_safety_stock(np.full(4, 10.0), np.full(4, 14), products.sum(forecast.T[None])[0].T, products, 14, cfg)[0]
+    assert pooled == pytest.approx(20.0)  # sqrt(4) x 10, not 4 x 10
+    shaky = twin.dc_safety_stock(np.full(4, 10.0), np.full(4, 14), products.sum(forecast.T[None])[0].T, products, 14, twin.TwinConfig(supplier_lead_sd_days=2.0))[0]
+    assert shaky > pooled  # lead-time variability adds buffer
+
+
+def test_inventory_and_holding_are_valued_at_cost():
+    rng = np.random.default_rng(9)
+    forecast = np.full((8, 40), 3.0)
+    demand = rng.poisson(3.0, (2, 8, 40)).astype(np.float32)
+    args = (demand, forecast, np.full(8, 2.0), np.full(8, 3), np.full(8, 4.0), twin.TwinConfig(warmup_days=7))
+    retail = twin.simulate(*args)["kpis"]
+    at_cost = twin.simulate(*args, unit_cost=np.full(8, 3.0), holding_rate=np.full(8, 0.01))["kpis"]
+    np.testing.assert_allclose(at_cost["inventory_value"], retail["inventory_value"] * 0.75, rtol=1e-5)
+    np.testing.assert_allclose(at_cost["holding_cost"], at_cost["inventory_value"] * 0.01 * 33 / 7, rtol=1e-5)
+    np.testing.assert_allclose(at_cost["lost_margin"], at_cost["lost_sales_value"] * 0.25, rtol=1e-5)
+
+
+def test_one_late_shipment_hurts_less_than_a_lasting_delay_and_replanning_helps():
+    rng = np.random.default_rng(10)
+    n, days = 40, 84
+    forecast = np.repeat(rng.uniform(1, 6, (n, 1)), days, axis=1)
+    demand = rng.poisson(forecast, (6, n, days)).astype(np.float32)
+    cfg = twin.TwinConfig(presentation_min=0, warmup_days=14, supplier_lead_sd_days=0.0)
+    lost = lambda shock: _run(demand, forecast, 3.0, cfg=cfg, shock=shock)["kpis"]["lost_sales_value"].mean()
+    base = lost(None)
+    once = lost(twin.make_shock({"delay": 7, "delay_days": [0, 7]}, np.full(n, "X"), 14))
+    lasting = lost(twin.make_shock({"delay": 7}, np.full(n, "X"), 14))
+    replanned = lost(twin.make_shock({"delay": 7, "replan_after": 7}, np.full(n, "X"), 14))
+    assert base <= once < lasting
+    assert replanned < lasting
+
+
+def test_current_practice_carries_the_same_safety_stock():
+    rng = np.random.default_rng(11)
+    forecast = np.full((20, 50), 4.0)
+    demand = rng.poisson(4.0, (3, 20, 50)).astype(np.float32)
+    lean = _run(demand, forecast, 0.0, policy="last_week_reorder")["kpis"]
+    buffered = _run(demand, forecast, 6.0, policy="last_week_reorder")["kpis"]
+    assert buffered["inventory_value"].mean() > lean["inventory_value"].mean()
+    assert buffered["fill_rate"].mean() > lean["fill_rate"].mean()
+
+
+def test_simulate_bundle_runs_every_store_together():
+    bundle = _bundle(n=40)
+    bundle["store_ids"] = np.repeat(np.array(["CA_1", "CA_2"]), 20)
+    bundle["item_ids"] = np.tile(np.array([f"I{i}" for i in range(20)]), 2)
+    bundle["cost"] = np.full(40, 0.7)
+    result = twin.simulate_bundle(bundle, {"reps": 6, "seed": 2, "scenario": {"delay": 7, "replan_after": 7}})
+    assert result["stores"] == ["CA_1", "CA_2"]
+    assert set(result["baseline"]["kpis"]) == {"all", "CA_1", "CA_2"}
+    assert result["baseline"]["timeline"]["group"][0].startswith("CA_1|")
+    assert result["scenario"]["kpis"]["all"]["lost_sales_value"]["mean"] >= result["baseline"]["kpis"]["all"]["lost_sales_value"]["mean"]

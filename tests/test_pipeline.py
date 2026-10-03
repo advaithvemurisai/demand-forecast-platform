@@ -114,12 +114,20 @@ def test_pipeline_twin_phase_writes_validated_tables(synthetic_root):
     for _, group in grid.groupby("category"):
         assert group["inventory_value"].is_monotonic_increasing
     stress = pd.read_parquet(gold / "twin_stress.parquet")
-    lost = stress[(stress["metric"] == "lost_sales_value") & (stress["policy"] == "forecast_reorder")]
+    lost = stress[(stress["metric"] == "lost_sales_value") & (stress["policy"] == "forecast_reorder") & (stress["rationing"] == "days_of_cover")]
     assert (lost["delta"] >= -1e-6).all()  # a shock never reduces lost sales
+    assert {"event_spike", "late_shipment", "supplier_delay", "dc_cut"} <= set(lost["scenario"])
+    assert set(stress.loc[stress["scenario"] == "dc_cut", "rationing"]) == {"proportional", "days_of_cover", "value"}
+    curve = pd.read_parquet(gold / "twin_policy_curve.parquet")
+    for _, group in curve.groupby("policy"):
+        assert group.sort_values("safety_multiplier")["inventory_value"].is_monotonic_increasing
+    assert {"saving_vs_current", "saving_lower", "saving_upper", "clear_saving", "at_grid_edge"} <= set(frontier.columns)
+    allocation = pd.read_parquet(gold / "allocation.parquet")
+    assert (allocation["on_hand_source"] == "twin replay of the holdout window").all() and (allocation["on_hand"] >= 0).all()
     exceptions = pd.read_parquet(gold / "twin_exceptions.parquet")
     assert exceptions["expected_lost_value"].is_monotonic_decreasing
     assert not pd.read_parquet(gold / "twin_timeline.parquet").empty
-    assert {"fill_rate", "recommended_service", "share_realised_in_band", "typical_miss"} <= set(summary["twin"])
+    assert {"fill_rate", "recommended_service", "share_realised_in_band", "typical_miss", "equal_inventory", "holdout_tradeoff", "service_saving"} <= set(summary["twin"])
     assert 0 <= summary["twin"]["typical_miss"]["fill_rate"] <= 1
 
 
@@ -152,11 +160,14 @@ def test_twin_bundles_load_without_pickle(synthetic_root):
     cfg = Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False, twin_reps=6)
     run(cfg)
     files = sorted((synthetic_root / "data" / "dashboard" / "twin_inputs").glob("*.npz"))
-    assert files
+    assert [path.name for path in files] == ["network.npz"]  # one bundle: every store shares the DC
     with np.load(files[0], allow_pickle=False) as data:
         bundle = {key: data[key] for key in data.files}
-    assert {"past_actual", "past_forecast", "forecast", "safety_by_service", "current_safety", "dept_ids"} <= set(bundle)
+    assert {"past_actual", "past_forecast", "forecast", "safety_by_service", "current_safety", "dept_ids", "store_ids", "item_ids", "cost", "holding_rate"} <= set(bundle)
+    assert bundle["safety_by_service"].shape[1] == len(twin.SERVICE_GRID)
+    assert (bundle["cost"] < bundle["price"]).all()
     bundle = {key: (value.item() if value.ndim == 0 else value) for key, value in bundle.items()}
-    bundle.pop("dates"), bundle.pop("item_ids")
+    bundle.pop("dates")
     result = twin.simulate_bundle(bundle, {"reps": 4, "seed": 1, "scenario": {"demand_scale": 1.4, "days": [3, 10]}})
-    assert result["scenario"]["kpis"]["lost_sales_value"]["mean"] >= result["baseline"]["kpis"]["lost_sales_value"]["mean"] - 1e-9
+    assert result["scenario"]["kpis"]["all"]["lost_sales_value"]["mean"] >= result["baseline"]["kpis"]["all"]["lost_sales_value"]["mean"] - 1e-9
+    assert set(result["baseline"]["kpis"]) == {"all", *result["stores"]} and len(result["stores"]) > 1

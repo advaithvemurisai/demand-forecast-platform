@@ -66,3 +66,14 @@ def test_fairness_violations_flags_only_long_short_runs():
     flagged = fairness_violations(fill, floor=0.5, max_weeks=2)
     assert flagged["node_id"].tolist() == ["a"]
     assert flagged["longest_short_run"].tolist() == [3]
+
+
+def test_allocation_counts_stock_already_on_the_shelf():
+    demand = pd.DataFrame({"forecast": [10.0, 10.0], "value": [1.0, 1.0]})
+    scenarios = np.array([[8.0, 10.0, 12.0], [8.0, 10.0, 12.0]])
+    result = allocate_inventory(demand, 10.0, scenarios, value_column="value", on_hand=np.array([10.0, 0.0]))
+    np.testing.assert_allclose(result["allocated_quantity"], [0.0, 10.0], atol=1e-6)  # the full store gets nothing
+    floor = allocate_inventory(demand, 6.0, scenarios, value_column="value", min_fill=0.5, on_hand=np.array([4.0, 0.0]))
+    assert floor["allocated_quantity"].iloc[0] >= 1.0 - 1e-6 and floor["allocated_quantity"].iloc[1] >= 5.0 - 1e-6
+    need = proportional_allocation(demand, 10.0, need=np.array([2.0, 8.0]))
+    np.testing.assert_allclose(need, [2.0, 8.0])

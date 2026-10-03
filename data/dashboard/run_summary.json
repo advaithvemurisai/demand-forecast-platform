@@ -178,20 +178,20 @@
   },
   "allocation": {
     "lp_scenario": {
-      "units_fulfilled": 1385752.9862,
+      "units_fulfilled": 1450381.0124,
       "units_demanded": 1519749.0,
-      "units_lost": 133996.0138,
-      "revenue_fulfilled": 4643213.6969,
-      "lost_revenue": 379728.7323,
-      "fill_rate": 0.9118
+      "units_lost": 69367.9876,
+      "revenue_fulfilled": 4821827.7471,
+      "lost_revenue": 201114.6822,
+      "fill_rate": 0.9544
     },
     "pro_rata": {
-      "units_fulfilled": 1397672.243,
+      "units_fulfilled": 1453280.8112,
       "units_demanded": 1519749.0,
-      "units_lost": 122076.757,
-      "revenue_fulfilled": 4611351.359,
-      "lost_revenue": 411591.0703,
-      "fill_rate": 0.9197
+      "units_lost": 66468.1888,
+      "revenue_fulfilled": 4800719.133,
+      "lost_revenue": 222223.2962,
+      "fill_rate": 0.9563
     }
   },
   "allocation_fairness": {
@@ -200,24 +200,24 @@
   },
   "allocation_vs_pro_rata_ci": {
     "revenue_fulfilled": {
-      "mean": 2655.1948257468807,
-      "lower": 1169.7030755444957,
-      "upper": 4140.686575949266,
+      "mean": 1759.0511732155621,
+      "lower": 155.27882942990345,
+      "upper": 3362.823517001221,
       "wins": 0.9166666666666666,
       "n": 12
     },
     "lost_revenue": {
-      "mean": -2655.19482574689,
-      "lower": -4140.686575949301,
-      "upper": -1169.7030755444787,
+      "mean": -1759.0511732155803,
+      "lower": -3362.8235170012395,
+      "upper": -155.2788294299212,
       "wins": 0.08333333333333333,
       "n": 12
     },
     "units_lost": {
-      "mean": 993.271401525502,
-      "lower": 634.6106049574721,
-      "upper": 1351.932198093532,
-      "wins": 1.0,
+      "mean": 241.64990437058137,
+      "lower": -196.62453395236875,
+      "upper": 679.9243426935315,
+      "wins": 0.5833333333333334,
       "n": 12
     }
   },
@@ -252,43 +252,107 @@
     }
   ],
   "timings_seconds": {
-    "load_and_features": 20.6,
-    "models_backtest_1": 214.4,
-    "models_backtest_2": 203.4,
-    "models_backtest_3": 186.4,
-    "models_holdout": 221.9,
-    "models_production": 125.9,
-    "twin": 72.6,
-    "total": 1050.6
+    "load_and_features": 14.0,
+    "models_backtest_1": 168.0,
+    "models_backtest_2": 171.2,
+    "models_backtest_3": 175.0,
+    "models_holdout": 175.7,
+    "models_production": 79.2,
+    "twin": 156.6,
+    "total": 943.2
   },
   "served_method": "mint_oos",
   "twin": {
     "validation_fold": "holdout",
     "fill_rate": {
-      "predicted": 0.9718841314315796,
-      "realised": 0.9745588898658752,
-      "lower": 0.9676903486251831,
-      "upper": 0.9755164384841919
+      "predicted": 0.9677330851554871,
+      "realised": 0.9702394008636475,
+      "lower": 0.9620996713638306,
+      "upper": 0.9726964235305786
     },
-    "share_realised_in_band": 0.05555555555555555,
+    "share_realised_in_band": 0.20833333333333334,
+    "share_realised_in_band_stores": 0.2604166666666667,
     "typical_miss": {
-      "fill_rate": 0.008135755856831869,
-      "in_stock_pct": 0.002257531743428798,
-      "lost_sales_value": 0.6636290253158754,
-      "inventory_value": 0.016276282731590368,
-      "units_lost": 0.4926121834735949,
-      "units_demanded": 0.07951909328448317
+      "fill_rate": 0.010587751865386963,
+      "in_stock_pct": 0.0030511174623998327,
+      "lost_sales_value": 0.6492807231389955,
+      "lost_margin": 0.6886155060148029,
+      "inventory_value": 0.017837422096397885,
+      "holding_cost": 0.017313883618099886,
+      "units_lost": 0.5298806102905499,
+      "units_demanded": 0.07561483014629389
     },
-    "fill_rate_gap": 0.0026747584342956543,
+    "fill_rate_gap": 0.0025063157081604004,
     "recommended_service": {
-      "FOODS": 0.95,
-      "HOBBIES": 0.98,
-      "HOUSEHOLD": 0.99
+      "FOODS": 0.98,
+      "HOBBIES": 0.99,
+      "HOUSEHOLD": 0.995
+    },
+    "service_at_grid_edge": [],
+    "service_saving": {
+      "FOODS": {
+        "saving": 215.81165650975424,
+        "lower": 66.58639040055759,
+        "upper": 363.24504346778934,
+        "clear": true
+      },
+      "HOBBIES": {
+        "saving": 669.6598319804264,
+        "lower": 369.0591634999213,
+        "upper": 1036.8283634269044,
+        "clear": true
+      },
+      "HOUSEHOLD": {
+        "saving": 1540.8753124144457,
+        "lower": 693.4354401199098,
+        "upper": 2225.626226991522,
+        "clear": true
+      }
+    },
+    "current_service_cost": {
+      "FOODS": 16431.483974902265,
+      "HOBBIES": 3786.391990551022,
+      "HOUSEHOLD": 11695.928107275866
     },
     "stress_added_lost_sales": {
-      "event_spike": 15876.4609375,
-      "supplier_delay": 180445.296875,
-      "dc_cut": 5572.140625
+      "event_spike": 21177.608521269383,
+      "late_shipment": 15345.540096165329,
+      "supplier_delay": 44278.59662389479,
+      "dc_cut": 8193.034156284946
+    },
+    "stress_added_lost_sales_band": {
+      "event_spike": [
+        15514.611211204192,
+        27623.65025033171
+      ],
+      "late_shipment": [
+        9638.013033688085,
+        22546.052116152347
+      ],
+      "supplier_delay": [
+        30425.865970539722,
+        59416.431306464525
+      ],
+      "dc_cut": [
+        4378.24951296265,
+        12939.133248457572
+      ]
+    },
+    "holdout_tradeoff": {
+      "fill_rate": 0.00013750791549682617,
+      "holding_cost": -327.7569257705236,
+      "in_stock_pct": -0.0007965140795577197,
+      "inventory_value": -13873.905479467008,
+      "lost_margin": 665.0751154367535,
+      "lost_sales_value": 1666.2614759250864,
+      "units_demanded": 0.0,
+      "units_lost": -71.708984375
+    },
+    "equal_inventory": {
+      "inventory_value": 401581.61095763824,
+      "forecast": 0.9701303243637085,
+      "current_practice": 0.968050852347102,
+      "current_practice_inventory_for_same": 415304.4689693993
     }
   }
 }

@@ -19,13 +19,13 @@ sys.path.insert(0, str(ROOT / "src"))  # the API needs forecasting.twin only, no
 
 from forecasting import twin  # noqa: E402
 
-app = FastAPI(title="Hierarchical Demand Forecast Platform", version="0.3.0")
+app = FastAPI(title="Hierarchical Demand Forecast Platform", version="0.4.0")
 # DATA_DIR points at the gold tables (locally) or the committed data/dashboard extract (hosted).
 GOLD_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data" / "gold"))
 TWIN_DIR = Path(os.environ.get("TWIN_DIR", ROOT / "data" / "dashboard" / "twin_inputs"))
 METRIC_TABLES = {"model_metrics", "reconciliation_metrics", "interval_coverage", "allocation_backtest", "drift"}
 TWIN_TABLES = {
-    "twin_validation", "twin_timeline", "twin_frontier", "twin_stress", "twin_exceptions", "override_fva", "decision_accuracy",
+    "twin_validation", "twin_timeline", "twin_frontier", "twin_policy_curve", "twin_stress", "twin_exceptions", "override_fva", "decision_accuracy",
     "weekday_bias", "event_accuracy", "bias_exceptions", "probable_stockouts", "interval_coverage_segment", "allocation_node_fill", "planning_cycle",
 }
 RATE_LIMIT, RATE_WINDOW = int(os.environ.get("TWIN_RATE_LIMIT", 30)), 60.0
@@ -52,10 +52,12 @@ class Scenario(BaseModel):
     dc_factor: float = Field(1.0, ge=0.1, le=1.5)
     dc_days: tuple[int, int] | None = None
     delay: int = Field(0, ge=0, le=14)
+    delay_days: tuple[int, int] | None = None  # which order days are late (default: all from day 0)
+    replan_after: int | None = Field(None, ge=0, le=28)  # days until the DC plans for the longer lead time
 
 
 class TwinRequest(BaseModel):
-    store_id: str = Field(pattern=r"^[A-Z]{2}_\d$")
+    store_id: str | None = Field(None, pattern=r"^[A-Z]{2}_\d$")  # optional check that the store is in the network
     policy: Literal["forecast_reorder", "last_week_reorder"] = "forecast_reorder"
     service: float | Literal["current"] = "current"
     rationing: Literal["proportional", "days_of_cover", "value"] = "days_of_cover"
@@ -100,23 +102,29 @@ def check_rate_limit(ip: str) -> None:
     hits.append(now)
 
 
-@lru_cache(maxsize=8)
-def load_bundle(store_id: str) -> dict:
-    path = TWIN_DIR / f"{store_id}.npz"
+@lru_cache(maxsize=1)
+def load_bundle() -> dict:
+    """The whole network's inputs: every store is simulated together because they share the DC."""
+    path = TWIN_DIR / "network.npz"
     if not path.exists():
-        raise HTTPException(status_code=404, detail=f"No twin inputs for store {store_id}")
+        raise HTTPException(status_code=404, detail="No twin inputs; run the pipeline")
     with np.load(path, allow_pickle=False) as data:
-        return {key: data[key] for key in data.files}
+        return {key: data[key] for key in data.files if key != "dates"}
+
+
+def network_stores() -> list[str]:
+    bundle = load_bundle()
+    return sorted(set(bundle["store_ids"].astype(str).tolist())) if "store_ids" in bundle else []
 
 
 @lru_cache(maxsize=64)
-def cached_simulation(store_id: str, payload: str) -> str:
-    return json.dumps(twin.simulate_bundle(load_bundle(store_id), json.loads(payload)))
+def cached_simulation(payload: str) -> str:
+    return json.dumps(twin.simulate_bundle(load_bundle(), json.loads(payload)))
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "gold_tables": sorted(path.stem for path in GOLD_DIR.glob("*.parquet")), "twin_stores": sorted(path.stem for path in TWIN_DIR.glob("*.npz"))}
+    return {"status": "ok", "gold_tables": sorted(path.stem for path in GOLD_DIR.glob("*.parquet")), "twin_stores": network_stores() if (TWIN_DIR / "network.npz").exists() else []}
 
 
 @app.get("/get-forecast", response_model=Page)
@@ -170,10 +178,13 @@ def get_twin_table(name: str, limit: int = Query(1000, ge=1, le=50_000), offset:
 
 @app.post("/twin/simulate")
 def simulate(body: TwinRequest, request: Request):
-    """Run a what-if on one store: baseline and scenario share the same random demand (KPIs are mean and 90% band)."""
+    """Run a what-if on the whole network (all stores share the DC). KPIs come back for "all" and per store, as mean and
+    90% band; the baseline and the scenario share the same random demand."""
     check_rate_limit(client_ip(request))
+    if body.store_id is not None and body.store_id not in network_stores():
+        raise HTTPException(status_code=404, detail=f"No store {body.store_id} in the network")
     payload = body.model_dump(exclude={"store_id"}, mode="json")
     try:
-        return json.loads(cached_simulation(body.store_id, json.dumps(payload, sort_keys=True)))
+        return json.loads(cached_simulation(json.dumps(payload, sort_keys=True)))
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

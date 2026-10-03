@@ -23,9 +23,18 @@ export interface Summary {
     validation_fold: string
     fill_rate: { predicted: number; realised: number; lower: number; upper: number }
     share_realised_in_band: number
+    share_realised_in_band_stores?: number | null
     fill_rate_gap: number
+    typical_miss?: Record<string, number>
     recommended_service: Record<string, number>
+    service_at_grid_edge?: string[]
+    service_saving?: Record<string, { saving: number; lower: number; upper: number; clear: boolean }>
+    current_service_cost?: Record<string, number>
     stress_added_lost_sales: Record<string, number>
+    stress_added_lost_sales_band?: Record<string, [number, number]>
+    /** Realised holdout: forecast policy minus current practice, per metric. */
+    holdout_tradeoff?: Record<string, number>
+    equal_inventory?: { inventory_value: number; forecast: number; current_practice: number | null; current_practice_inventory_for_same: number | null } | null
   }
 }
 
@@ -38,11 +47,12 @@ export interface AllocationRow {
   node_id: string; dept_id: string; store_id: string; forecast: number; unit_value: number; margin_value?: number
   allocated_quantity: number; pro_rata_quantity: number; expected_fill_rate: number; stockout_risk: number
   supply: number; week_start: string; safety_stock: number; order_up_to: number
+  on_hand?: number; net_need?: number; on_hand_source?: string
 }
 export interface AllocationBacktestRow {
   fold: string; week: number; policy: string; supply: number; units_fulfilled: number; units_demanded: number
   fill_rate: number; revenue_fulfilled: number; stockout_nodes: number
-  units_lost?: number; lost_revenue?: number; min_node_fill?: number
+  units_lost?: number; lost_revenue?: number; min_node_fill?: number; margin_fulfilled?: number; start_stock?: number; end_stock?: number
 }
 export interface NodeFillRow { fold: string; week: number; policy: string; node_id: string; fill_rate: number }
 export interface DriftRow {
@@ -80,10 +90,15 @@ export interface TwinTimelineRow { date: string; store_id: string; dept_id: stri
 export interface TwinFrontierRow {
   category: string; service_level: number | null; label: string; fill_rate: number; in_stock_pct: number; inventory_value: number
   lost_sales_value: number; lost_margin: number; holding_cost: number; total_cost: number; total_cost_lower: number; total_cost_upper: number; recommended: boolean
+  saving_vs_current: number; saving_lower: number; saving_upper: number; clear_saving: boolean; at_grid_edge: boolean
 }
 export interface TwinStressRow {
-  scenario: string; label: string; policy: string; metric: string; baseline: number; baseline_lower: number; baseline_upper: number
-  scenario_value: number; scenario_lower: number; scenario_upper: number; delta: number
+  scenario: string; label: string; policy: string; rationing: string; metric: string; baseline: number; baseline_lower: number; baseline_upper: number
+  scenario_value: number; scenario_lower: number; scenario_upper: number; delta: number; delta_lower: number; delta_upper: number
+}
+export interface TwinPolicyCurveRow {
+  policy: string; safety_multiplier: number; fill_rate: number; in_stock_pct: number; lost_sales_value: number; lost_margin: number
+  inventory_value: number; holding_cost: number; units_lost: number; units_demanded: number
 }
 export interface TwinExceptionRow {
   series_id: string; item_id: string; dept_id: string; cat_id: string; store_id: string
@@ -92,19 +107,22 @@ export interface TwinExceptionRow {
 
 export interface KpiBand { mean: number; lower: number; upper: number }
 export type KpiSet = Record<string, KpiBand>
-export interface TwinTimelineSet { dept: string[]; on_hand: number[][]; demand: number[][]; lost: number[][] }
-export interface TwinOutcome { kpis: KpiSet; timeline: TwinTimelineSet }
-export interface TwinResult { policy: string; service: string | number; reps: number; baseline: TwinOutcome; scenario: TwinOutcome | null }
-export interface TwinPresets { dates: string[]; results: Record<string, TwinResult> }
+/** Timeline columns are "STORE|DEPT" groups for a network run. */
+export interface TwinTimelineSet { group: string[]; on_hand: number[][]; demand: number[][]; lost: number[][] }
+/** KPIs for the network ("all") and for each store. */
+export interface TwinOutcome { kpis: Record<string, KpiSet>; timeline: TwinTimelineSet }
+export interface TwinResult { policy: string; service: string | number; reps: number; stores: string[]; baseline: TwinOutcome; scenario: TwinOutcome | null }
 export interface TwinPresetIndex {
   stores: string[]
+  dates: string[]
   presets: Record<string, { label: string; detail: string; scenario: Record<string, unknown> }>
   service_grid: number[]
   policies: string[]
+  results: Record<string, TwinResult>
 }
 export interface TwinScenario {
   demand_scale?: number; category?: string | null; days?: [number, number] | null
-  dc_factor?: number; dc_days?: [number, number] | null; delay?: number
+  dc_factor?: number; dc_days?: [number, number] | null; delay?: number; delay_days?: [number, number] | null; replan_after?: number | null
 }
 export interface TwinRequest {
   policy: string; service: 'current' | number; rationing: string; scenario: TwinScenario | null; reps: number; seed: number

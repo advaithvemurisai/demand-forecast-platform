@@ -1,4 +1,4 @@
-"""Build the static data the web app loads: JSON tables, per-store twin inputs, and precomputed what-if presets.
+"""Build the static data the web app loads: JSON tables, the network's twin inputs, and precomputed what-if presets.
 
     python scripts/build_web_data.py            # reads data/dashboard, writes web/public/{data,py}
 
@@ -24,7 +24,8 @@ from forecasting import twin  # noqa: E402
 SCHEMA_VERSION = 1
 PRESETS = {
     "event_spike": {"label": "Holiday-style spike", "detail": "FOODS demand +50% for one week", "scenario": {"demand_scale": 1.5, "category": "FOODS", "days": [7, 14]}},
-    "supplier_delay": {"label": "Supplier delay", "detail": "Supplier lead time 7 → 14 days", "scenario": {"delay": 7}},
+    "late_shipment": {"label": "One late delivery", "detail": "This week's supplier delivery arrives 7 days late", "scenario": {"delay": 7, "delay_days": [0, 7]}},
+    "supplier_delay": {"label": "Supplier slows down", "detail": "Lead time 7 → 14 days; planner adjusts after a week", "scenario": {"delay": 7, "replan_after": 7}},
     "dc_cut": {"label": "Warehouse shortfall", "detail": "DC receives 30% less stock for two weeks", "scenario": {"dc_factor": 0.7, "dc_days": [7, 21]}},
 }
 POLICIES = ("forecast_reorder", "last_week_reorder")
@@ -81,7 +82,7 @@ def build(source: Path, out: Path, web: Path) -> dict[str, int]:
     for name in ("reconciliation_metrics", "model_metrics", "interval_coverage", "allocation", "allocation_backtest", "drift"):
         sizes[f"{name}.json"] = write_json(data / f"{name}.json", records(read(source, name)))
     for name in ("interval_coverage_segment", "allocation_node_fill", "decision_accuracy", "weekday_bias", "event_accuracy", "bias_exceptions",
-                 "override_fva", "probable_stockouts", "twin_validation", "twin_timeline", "twin_frontier", "twin_stress", "twin_exceptions"):
+                 "override_fva", "probable_stockouts", "twin_validation", "twin_timeline", "twin_frontier", "twin_policy_curve", "twin_stress", "twin_exceptions"):
         frame = read(source, name, required=False)
         if frame is not None:
             sizes[f"{name}.json"] = write_json(data / f"{name}.json", records(frame))
@@ -132,30 +133,28 @@ def build(source: Path, out: Path, web: Path) -> dict[str, int]:
 
 
 def build_twin(source: Path, out: Path, data: Path) -> dict[str, int]:
-    """Copy per-store inputs for the browser worker and precompute the preset what-ifs with the same engine."""
-    inputs = source / "twin_inputs"
-    if not inputs.exists():
+    """Copy the network's inputs for the browser worker and precompute the preset what-ifs with the same engine."""
+    path = source / "twin_inputs" / "network.npz"
+    if not path.exists():
         return {}
-    sizes, stores = {}, []
-    for path in sorted(inputs.glob("*.npz")):
-        store = path.stem
-        target = data / "twin" / "inputs" / path.name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(path, target)
-        sizes[f"twin/inputs/{path.name}"] = target.stat().st_size
-        with np.load(path, allow_pickle=False) as raw:
-            bundle = {key: raw[key] for key in raw.files}
-        bundle = {key: (value.item() if value.ndim == 0 else value) for key, value in bundle.items()}
-        dates = [str(d) for d in bundle.pop("dates")]
-        bundle.pop("item_ids", None)
-        presets = {"dates": dates, "results": {}}
-        for policy in POLICIES:
-            presets["results"][f"baseline|{policy}"] = twin.simulate_bundle(bundle, {"policy": policy, "reps": 50, "seed": 1})
-            for key, preset in PRESETS.items():
-                presets["results"][f"{key}|{policy}"] = twin.simulate_bundle(bundle, {"policy": policy, "reps": 50, "seed": 1, "scenario": preset["scenario"]})
-        sizes[f"twin/presets/{store}.json"] = write_json(data / "twin" / "presets" / f"{store}.json", presets)
-        stores.append(store)
-    sizes["twin/presets.json"] = write_json(data / "twin" / "presets.json", {"stores": stores, "presets": PRESETS, "service_grid": list(twin.SERVICE_GRID), "policies": list(POLICIES)})
+    sizes = {}
+    target = data / "twin" / "network.npz"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path, target)
+    sizes["twin/network.npz"] = target.stat().st_size
+    with np.load(path, allow_pickle=False) as raw:
+        bundle = {key: raw[key] for key in raw.files}
+    bundle = {key: (value.item() if value.ndim == 0 else value) for key, value in bundle.items()}
+    dates = [str(d) for d in bundle.pop("dates")]
+    results = {}
+    for policy in POLICIES:
+        results[f"baseline|{policy}"] = twin.simulate_bundle(bundle, {"policy": policy, "reps": 50, "seed": 1})
+        for key, preset in PRESETS.items():
+            results[f"{key}|{policy}"] = twin.simulate_bundle(bundle, {"policy": policy, "reps": 50, "seed": 1, "scenario": preset["scenario"]})
+    stores = sorted(set(bundle["store_ids"].astype(str).tolist()))
+    sizes["twin/presets.json"] = write_json(data / "twin" / "presets.json", {
+        "stores": stores, "dates": dates, "presets": PRESETS, "service_grid": list(twin.SERVICE_GRID), "policies": list(POLICIES), "results": results,
+    })
     return sizes
 
 

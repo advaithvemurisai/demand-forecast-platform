@@ -4,8 +4,8 @@ import type { WorkerIn, WorkerOut } from './worker'
 export type Stage = 'runtime' | 'inputs' | 'simulating'
 export const STAGE_LABELS: Record<Stage, string> = {
   runtime: 'Loading the Python simulator (one-time, about 12 MB)…',
-  inputs: 'Loading this store’s forecast…',
-  simulating: 'Simulating…',
+  inputs: 'Loading the four stores’ forecasts (about 5 MB)…',
+  simulating: 'Simulating all four stores and the warehouse…',
 }
 
 let worker: Worker | undefined
@@ -42,10 +42,10 @@ export function warmSimulator(): void {
   ensureWorker().postMessage({ type: 'warm', base: base() } satisfies WorkerIn)
 }
 
-export function runSimulation(store: string, request: TwinRequest, progress?: (stage: Stage) => void): Promise<TwinResult> {
+export function runSimulation(request: TwinRequest, progress?: (stage: Stage) => void): Promise<TwinResult> {
   const id = nextId++
   return new Promise<TwinResult>((resolve, reject) => {
     waiting.set(id, { resolve, reject, progress })
-    ensureWorker().postMessage({ type: 'run', id, base: base(), store, request } satisfies WorkerIn)
+    ensureWorker().postMessage({ type: 'run', id, base: base(), request } satisfies WorkerIn)
   })
 }

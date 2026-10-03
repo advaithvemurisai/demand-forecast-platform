@@ -11,7 +11,8 @@ REQUESTS = {
     "spike": {"reps": 12, "seed": 5, "scenario": {"demand_scale": 1.5, "category": "FOODS", "days": [7, 14]}},
     "dc_cut_last_week": {"reps": 12, "seed": 5, "policy": "last_week_reorder", "service": 0.9, "scenario": {"dc_factor": 0.7, "dc_days": [7, 21]}},
     # The path the website uses: demand bootstrapped from past weeks of actual sales.
-    "bootstrap_delay": {"reps": 12, "seed": 5, "bootstrap": True, "scenario": {"delay": 7}},
+    "bootstrap_delay": {"reps": 12, "seed": 5, "bootstrap": True, "scenario": {"delay": 7, "replan_after": 7}},
+    "late_shipment": {"reps": 12, "seed": 5, "service": 0.995, "scenario": {"delay": 7, "delay_days": [0, 7]}},
     "bootstrap_value_rationing": {"reps": 12, "seed": 5, "bootstrap": True, "rationing": "value", "scenario": {"dc_factor": 0.6, "dc_days": [0, 28]}},
 }
 
@@ -40,8 +41,13 @@ def fixture_bundle():
     return {
         "history": history, "forecast": forecast, "scale": np.maximum(forecast[:, 0], 1.0).astype(np.float32),
         "current_safety": (1.0 + (index % 5)).astype(np.float32),
-        "safety_by_service": (np.linspace(1.0, 6.0, 6)[None, :] * (1.0 + (index % 3))[:, None]).astype(np.float32),
+        "safety_by_service": (np.linspace(1.0, 6.0, 8)[None, :] * (1.0 + (index % 3))[:, None]).astype(np.float32),
         "review": np.where(index % 2 == 0, 2, 7).astype(np.int8), "price": (1.0 + (index % 4) * 0.5).astype(np.float32),
         "score_paths": score_paths, "dept_ids": np.array(["FOODS_1" if i < 12 else "HOBBIES_1" for i in range(N)]),
         "cat_ids": np.array(["FOODS" if i < 12 else "HOBBIES" for i in range(N)]),
+        # Two stores carrying the same six products in each department, so the DC rations each product between them.
+        "store_ids": np.array(["CA_1" if i % 2 == 0 else "CA_2" for i in range(N)]),
+        "item_ids": np.array([f"ITEM_{i // 2}" for i in range(N)]),
+        "cost": ((1.0 + (index % 4) * 0.5) * 0.7).astype(np.float32),
+        "holding_rate": np.where(index < 12, 0.015, 0.005).astype(np.float32),
     }
