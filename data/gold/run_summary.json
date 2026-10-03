@@ -14,7 +14,31 @@
       0.95
     ],
     "supply_ratio": 0.9,
+    "min_fill": 0.5,
+    "fairness_weeks": 2,
+    "margin_by_category": {
+      "FOODS": 0.25,
+      "HOUSEHOLD": 0.3,
+      "HOBBIES": 0.4
+    },
     "n_scenarios": 25,
+    "lead_time_days": 1,
+    "review_days_by_category": {
+      "FOODS": 2,
+      "HOUSEHOLD": 7,
+      "HOBBIES": 7
+    },
+    "presentation_min": 2.0,
+    "holding_by_category": {
+      "FOODS": 0.015,
+      "HOUSEHOLD": 0.005,
+      "HOBBIES": 0.005
+    },
+    "case_pack": 1,
+    "temporal": false,
+    "twin": true,
+    "twin_reps": 50,
+    "mask_stockouts": true,
     "n_estimators": 300,
     "prophet": true,
     "mlflow": true,
@@ -34,34 +58,34 @@
     "base": {
       "category": 0.0785,
       "department": 0.0977,
-      "item": 0.7407,
+      "item": 0.7645,
       "state": 0.052,
       "store": 0.0644,
       "total": 0.052
     },
     "bottom_up": {
-      "category": 0.0974,
-      "department": 0.1129,
-      "item": 0.7407,
-      "state": 0.0653,
-      "store": 0.0824,
-      "total": 0.0653
+      "category": 0.092,
+      "department": 0.1061,
+      "item": 0.7645,
+      "state": 0.0579,
+      "store": 0.0803,
+      "total": 0.0579
     },
     "mint_diagonal": {
-      "category": 0.0901,
-      "department": 0.1063,
-      "item": 0.7412,
-      "state": 0.0588,
-      "store": 0.0756,
-      "total": 0.0588
+      "category": 0.0821,
+      "department": 0.0973,
+      "item": 0.7604,
+      "state": 0.0487,
+      "store": 0.0683,
+      "total": 0.0487
     },
     "mint_oos": {
-      "category": 0.0882,
-      "department": 0.1048,
-      "item": 0.7413,
-      "state": 0.0571,
-      "store": 0.0742,
-      "total": 0.0571
+      "category": 0.079,
+      "department": 0.0947,
+      "item": 0.7588,
+      "state": 0.0464,
+      "store": 0.0646,
+      "total": 0.0464
     },
     "top_down": {
       "category": 0.0969,
@@ -76,34 +100,34 @@
     "base": {
       "category": 0.069,
       "department": 0.086,
-      "item": 0.7267,
+      "item": 0.7498,
       "state": 0.0462,
       "store": 0.0578,
       "total": 0.0462
     },
     "bottom_up": {
-      "category": 0.0985,
-      "department": 0.1131,
-      "item": 0.7267,
-      "state": 0.0693,
-      "store": 0.0861,
-      "total": 0.0693
+      "category": 0.0817,
+      "department": 0.0991,
+      "item": 0.7498,
+      "state": 0.0369,
+      "store": 0.0701,
+      "total": 0.0369
     },
     "mint_diagonal": {
-      "category": 0.0899,
-      "department": 0.105,
-      "item": 0.727,
-      "state": 0.0636,
-      "store": 0.0788,
-      "total": 0.0636
+      "category": 0.0732,
+      "department": 0.0913,
+      "item": 0.7457,
+      "state": 0.0326,
+      "store": 0.0596,
+      "total": 0.0326
     },
     "mint_oos": {
-      "category": 0.0827,
-      "department": 0.0986,
-      "item": 0.7275,
-      "state": 0.0585,
-      "store": 0.0724,
-      "total": 0.0585
+      "category": 0.0697,
+      "department": 0.0874,
+      "item": 0.7434,
+      "state": 0.0314,
+      "store": 0.0552,
+      "total": 0.0314
     },
     "top_down": {
       "category": 0.0964,
@@ -115,61 +139,92 @@
     }
   },
   "model_wmape_item": {
-    "lgbm_global": 0.7407,
-    "lgbm_local": 0.7433,
+    "lgbm_global": 0.7645,
+    "lgbm_local": 0.7631,
     "naive": 1.0367,
     "seasonal_naive": 0.8876
   },
   "wrmsse_holdout": {
-    "base": 0.4923,
-    "bottom_up": 0.6066,
-    "mint_diagonal": 0.5651,
-    "mint_oos": 0.5364,
+    "base": 0.4924,
+    "bottom_up": 0.4926,
+    "mint_diagonal": 0.4573,
+    "mint_oos": 0.4475,
     "top_down": 0.5886
   },
   "wrmsse_backtest": {
-    "base": 0.5492,
-    "bottom_up": 0.5773,
-    "mint_diagonal": 0.5533,
-    "mint_oos": 0.555,
+    "base": 0.5486,
+    "bottom_up": 0.5784,
+    "mint_diagonal": 0.5315,
+    "mint_oos": 0.5189,
     "top_down": 0.5862
   },
   "interval_coverage": {
     "0.8": {
-      "category": 0.7817,
-      "department": 0.7687,
-      "item": 0.8042,
-      "state": 0.7857,
-      "store": 0.7381,
-      "total": 0.7857
+      "category": 0.754,
+      "department": 0.7449,
+      "item": 0.784,
+      "state": 0.7143,
+      "store": 0.7083,
+      "total": 0.7143
     },
     "0.95": {
-      "category": 0.9385,
-      "department": 0.9418,
-      "item": 0.9526,
-      "state": 0.9286,
+      "category": 0.9236,
+      "department": 0.9286,
+      "item": 0.9414,
+      "state": 0.9405,
       "store": 0.9256,
-      "total": 0.9286
+      "total": 0.9405
     }
   },
   "allocation": {
     "lp_scenario": {
-      "units_fulfilled": 1296284.5212,
+      "units_fulfilled": 1385752.9862,
       "units_demanded": 1519749.0,
-      "revenue_fulfilled": 4412310.0089,
-      "fill_rate": 0.853
+      "units_lost": 133996.0138,
+      "revenue_fulfilled": 4643213.6969,
+      "lost_revenue": 379728.7323,
+      "fill_rate": 0.9118
     },
     "pro_rata": {
-      "units_fulfilled": 1308155.9018,
+      "units_fulfilled": 1397672.243,
       "units_demanded": 1519749.0,
-      "revenue_fulfilled": 4344291.8287,
-      "fill_rate": 0.8608
+      "units_lost": 122076.757,
+      "revenue_fulfilled": 4611351.359,
+      "lost_revenue": 411591.0703,
+      "fill_rate": 0.9197
+    }
+  },
+  "allocation_fairness": {
+    "lp_scenario": [],
+    "pro_rata": []
+  },
+  "allocation_vs_pro_rata_ci": {
+    "revenue_fulfilled": {
+      "mean": 2655.1948257468807,
+      "lower": 1169.7030755444957,
+      "upper": 4140.686575949266,
+      "wins": 0.9166666666666666,
+      "n": 12
+    },
+    "lost_revenue": {
+      "mean": -2655.19482574689,
+      "lower": -4140.686575949301,
+      "upper": -1169.7030755444787,
+      "wins": 0.08333333333333333,
+      "n": 12
+    },
+    "units_lost": {
+      "mean": 993.271401525502,
+      "lower": 634.6106049574721,
+      "upper": 1351.932198093532,
+      "wins": 1.0,
+      "n": 12
     }
   },
   "drift": [
     {
       "node_id": "store:store_id=CA_1",
-      "psi": 0.009447917619286188,
+      "psi": 0.009420715564498397,
       "drift": false,
       "retrain": false,
       "retrain_reasons": "stable"
@@ -190,20 +245,50 @@
     },
     {
       "node_id": "store:store_id=CA_4",
-      "psi": 0.012032256539912954,
+      "psi": 0.011954464296143233,
       "drift": false,
       "retrain": false,
       "retrain_reasons": "stable"
     }
   ],
   "timings_seconds": {
-    "load_and_features": 25.0,
-    "models_backtest_1": 203.2,
-    "models_backtest_2": 183.8,
-    "models_backtest_3": 206.2,
-    "models_holdout": 207.5,
-    "models_production": 90.4,
-    "total": 919.4
+    "load_and_features": 20.6,
+    "models_backtest_1": 214.4,
+    "models_backtest_2": 203.4,
+    "models_backtest_3": 186.4,
+    "models_holdout": 221.9,
+    "models_production": 125.9,
+    "twin": 72.6,
+    "total": 1050.6
   },
-  "served_method": "mint_diagonal"
+  "served_method": "mint_oos",
+  "twin": {
+    "validation_fold": "holdout",
+    "fill_rate": {
+      "predicted": 0.9718841314315796,
+      "realised": 0.9745588898658752,
+      "lower": 0.9676903486251831,
+      "upper": 0.9755164384841919
+    },
+    "share_realised_in_band": 0.05555555555555555,
+    "typical_miss": {
+      "fill_rate": 0.008135755856831869,
+      "in_stock_pct": 0.002257531743428798,
+      "lost_sales_value": 0.6636290253158754,
+      "inventory_value": 0.016276282731590368,
+      "units_lost": 0.4926121834735949,
+      "units_demanded": 0.07951909328448317
+    },
+    "fill_rate_gap": 0.0026747584342956543,
+    "recommended_service": {
+      "FOODS": 0.95,
+      "HOBBIES": 0.98,
+      "HOUSEHOLD": 0.99
+    },
+    "stress_added_lost_sales": {
+      "event_spike": 15876.4609375,
+      "supplier_delay": 180445.296875,
+      "dc_cut": 5572.140625
+    }
+  }
 }

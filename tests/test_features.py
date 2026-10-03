@@ -40,3 +40,21 @@ def test_short_lags_are_rejected():
 def test_feature_columns_exclude_target():
     columns = feature_columns(add_features(frame()))
     assert "sales" not in columns and "lag_28" in columns
+
+
+def test_event_distances_and_major_flag():
+    from forecasting.features import event_distances
+
+    dates = pd.Series(pd.to_datetime(["2016-02-05", "2016-02-06", "2016-02-07", "2016-02-08", "2016-03-30"]))
+    to_next, since = event_distances(dates, pd.to_datetime(["2016-02-07"]).values)
+    assert to_next.tolist()[:3] == [2, 1, 0]
+    assert since.tolist()[2:4] == [15, 1]  # no earlier event within the window; then one day after
+    assert to_next[4] == 15 and since[4] == 15  # nothing within 14 days either side
+
+
+def test_closed_mask_marks_christmas_only():
+    from forecasting.features import closed_mask
+
+    frame = pd.DataFrame({"event_name_1": ["Christmas", "Thanksgiving", None]})
+    assert closed_mask(frame).tolist() == [True, False, False]
+    assert closed_mask(pd.DataFrame({"x": [1]})).tolist() == [False]

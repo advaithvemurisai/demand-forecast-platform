@@ -95,3 +95,24 @@ def mint_diagonal(
     correction = var_bottom[:, None] * (A.T @ np.linalg.solve(core, A @ scaled))
     bottom = scaled - correction
     return np.asarray(A @ bottom), bottom
+
+
+def temporal_reconcile(daily: np.ndarray, weekly: np.ndarray, daily_var: np.ndarray, weekly_var: np.ndarray) -> np.ndarray:
+    """Make daily forecasts agree with weekly ones (two-level temporal hierarchy, diagonal MinT).
+
+    For each node and week, find daily values ``d'`` minimising
+    ``sum_i (d'_i - d_i)^2 / vd + (sum_i d'_i - W)^2 / vw``: the weekly total moves toward the
+    weekly forecast ``W`` in proportion to how much more reliable that forecast is, and the
+    adjustment is shared equally across the 7 days. ``daily`` is (nodes, 7 * weeks).
+    """
+    nodes, days = daily.shape
+    weeks = days // 7
+    if days % 7 or weekly.shape != (nodes, weeks):
+        raise ValueError("daily must hold whole weeks and weekly must have one column per week")
+    shaped = daily.reshape(nodes, weeks, 7)
+    gap = weekly - shaped.sum(axis=2)
+    vd = np.asarray(daily_var, dtype=float)[:, None]
+    vw = np.asarray(weekly_var, dtype=float)[:, None]
+    denominator = vw + 7 * vd
+    adjustment = np.divide(gap * vd, denominator, out=np.zeros_like(gap), where=denominator > 0)
+    return np.clip(shaped + adjustment[:, :, None], 0, None).reshape(nodes, days)

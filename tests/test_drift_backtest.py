@@ -51,3 +51,17 @@ def test_wrmsse_matches_hand_calculation():
     assert wrmsse(actual, forecast, np.array([2.0, 2.0]), np.array([1.0, 3.0])) == pytest.approx(0.25 * 1 + 0.75 * 2)
     # a node with no sales history (zero scale) is ignored
     assert wrmsse(actual, forecast, np.array([2.0, 0.0]), np.array([1.0, 3.0])) == pytest.approx(1.0)
+
+
+def test_psi_ignores_masked_nan_values():
+    import numpy as np
+    from forecasting.drift import psi
+
+    rng = np.random.default_rng(0)
+    reference, shifted = rng.normal(0, 1, 5000), rng.normal(1.0, 1, 5000)
+    clean = psi(reference, shifted)
+    masked_reference = np.where(rng.random(5000) < 0.1, np.nan, reference)
+    masked_shifted = np.where(rng.random(5000) < 0.1, np.nan, shifted)
+    assert psi(masked_reference, masked_shifted) == pytest.approx(clean, rel=0.15)
+    assert clean > 0.2
+    assert psi(np.full(10, np.nan), shifted) == 0.0

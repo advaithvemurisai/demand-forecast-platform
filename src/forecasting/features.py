@@ -10,6 +10,33 @@ import numpy as np
 import pandas as pd
 
 ID_FEATURES = ["item_id", "dept_id", "cat_id", "store_id"]
+# Events that move whole-store traffic; the model also gets distance-to-event features for every event.
+MAJOR_EVENTS = {
+    "SuperBowl", "ValentinesDay", "Easter", "Mother's day", "Father's day", "MemorialDay",
+    "IndependenceDay", "LaborDay", "Halloween", "Thanksgiving", "Christmas", "NewYear",
+}
+EVENT_WINDOW = 14
+
+
+def closed_mask(frame: pd.DataFrame) -> np.ndarray:
+    """Days the stores are shut (Christmas): sales are zero by closure, not by demand."""
+    if "event_name_1" not in frame:
+        return np.zeros(len(frame), dtype=bool)
+    return (frame["event_name_1"] == "Christmas").to_numpy()
+
+
+def event_distances(dates: pd.Series, event_dates: np.ndarray, window: int = EVENT_WINDOW) -> tuple[np.ndarray, np.ndarray]:
+    """Days until the next event (0 on the day) and since the previous one, capped at window + 1."""
+    day = dates.to_numpy().astype("datetime64[D]").astype(np.int64)
+    events = np.sort(np.unique(np.asarray(event_dates).astype("datetime64[D]").astype(np.int64)))
+    cap = window + 1
+    if events.size == 0:
+        return np.full(len(day), cap, dtype="int8"), np.full(len(day), cap, dtype="int8")
+    nxt = np.searchsorted(events, day, side="left")
+    to_next = np.where(nxt < events.size, events[np.minimum(nxt, events.size - 1)] - day, cap)
+    prev = nxt - 1  # strictly before ``day``
+    since = np.where(prev >= 0, day - events[np.maximum(prev, 0)], cap)
+    return np.minimum(to_next, cap).astype("int8"), np.minimum(since, cap).astype("int8")
 
 
 def add_features(
@@ -56,9 +83,15 @@ def add_features(
     if "event_name_1" in result:
         result["is_event"] = result["event_name_1"].notna().astype("int8")
         result["event_type"] = result["event_type_1"].astype("category").cat.codes.astype("int8")
+        result["is_major_event"] = result["event_name_1"].isin(MAJOR_EVENTS).astype("int8")
+        event_dates = result.loc[result["event_name_1"].notna(), "date"].unique()
+        result["days_to_event"], result["days_since_event"] = event_distances(result["date"], event_dates)
     else:
         result["is_event"] = np.int8(0)
         result["event_type"] = np.int8(-1)
+        result["is_major_event"] = np.int8(0)
+        result["days_to_event"] = np.int8(EVENT_WINDOW + 1)
+        result["days_since_event"] = np.int8(EVENT_WINDOW + 1)
     if "state_id" in result and any(f"snap_{state}" in result for state in ("CA", "TX", "WI")):
         snap = np.zeros(len(result), dtype="int8")
         for state in ("CA", "TX", "WI"):
@@ -86,7 +119,7 @@ def feature_columns(frame: pd.DataFrame) -> list[str]:
         if column.startswith(("lag_", "rolling_"))
     ] + [
         "day_of_week", "day_of_month", "month", "week_of_year", "is_weekend",
-        "promo", "is_event", "event_type", "snap", "price_ratio", "price_change_7",
+        "promo", "is_event", "event_type", "is_major_event", "days_to_event", "days_since_event", "snap", "price_ratio", "price_change_7",
     ]
     if "sell_price" in frame:
         numeric.append("sell_price")

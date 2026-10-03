@@ -32,6 +32,18 @@ def arima_forecast(values: pd.Series, horizon: int, order=(1, 1, 1), seasonal_or
     return pd.Series(np.clip(fitted.forecast(horizon), 0, None), name="forecast"), variance
 
 
+def arima_weekly_forecast(weekly_values: np.ndarray, horizon_weeks: int) -> tuple[np.ndarray, float]:
+    """Non-seasonal ARIMA(1,1,1) on weekly totals; returns the forecast and in-sample residual variance."""
+    import warnings
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+    model = SARIMAX(np.asarray(weekly_values, dtype=float), order=(1, 1, 1), enforce_stationarity=False, enforce_invertibility=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fitted = model.fit(disp=False)
+    return np.clip(fitted.forecast(horizon_weeks), 0, None), float(np.var(fitted.resid[2:]))
+
+
 def forecast_all(frame: pd.DataFrame, horizon: int, season_length: int = 7) -> pd.DataFrame:
     """Naive and seasonal-naive forecasts for every ``series_id`` (vectorised).
 

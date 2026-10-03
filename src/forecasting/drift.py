@@ -13,6 +13,9 @@ def psi(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float:
     """
     expected = np.asarray(expected, dtype=float)
     actual = np.asarray(actual, dtype=float)
+    expected, actual = expected[np.isfinite(expected)], actual[np.isfinite(actual)]  # masked (stockout) days are NaN
+    if expected.size == 0 or actual.size == 0:
+        return 0.0
     inner = np.unique(np.quantile(expected, np.linspace(0, 1, bins + 1))[1:-1])
     edges = np.concatenate([[-np.inf], inner, [np.inf]])
     if len(edges) < 3:

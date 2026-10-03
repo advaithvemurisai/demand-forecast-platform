@@ -13,6 +13,11 @@ def export_gold(outputs: dict[str, pd.DataFrame], output_dir: str | Path) -> Non
         frame.to_csv(output_dir / f"{name}.csv", index=False)
 
 
+# Written by newer pipeline stages; copied when present so the web app can show them.
+OPTIONAL_TABLES = (
+    "interval_coverage_segment", "allocation_node_fill", "decision_accuracy", "weekday_bias", "event_accuracy", "bias_exceptions",
+    "override_fva", "probable_stockouts", "twin_validation", "twin_timeline", "twin_frontier", "twin_stress", "twin_exceptions", "planning_cycle",
+)
 DASHBOARD_TABLES = (
     "model_metrics", "reconciliation_metrics", "interval_coverage", "allocation",
     "allocation_backtest", "drift", "backtest_forecasts",
@@ -35,6 +40,12 @@ def export_dashboard_extract(gold_dir: str | Path, output_dir: str | Path) -> di
         frame = pd.read_parquet(gold_dir / f"{name}.parquet")
         frame.to_parquet(output_dir / f"{name}.parquet", index=False)
         sizes[name] = len(frame)
+    for name in OPTIONAL_TABLES:
+        path = gold_dir / f"{name}.parquet"
+        if path.exists():
+            frame = pd.read_parquet(path)
+            frame.to_parquet(output_dir / f"{name}.parquet", index=False)
+            sizes[name] = len(frame)
     intervals = pd.read_parquet(gold_dir / "prediction_intervals.parquet").drop(columns=["method"], errors="ignore")
     float_columns = intervals.select_dtypes("float").columns
     intervals[float_columns] = intervals[float_columns].astype("float32").round(3)

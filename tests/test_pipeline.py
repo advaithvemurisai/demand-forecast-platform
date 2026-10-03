@@ -63,3 +63,100 @@ def test_pipeline_writes_dashboard_extract(synthetic_root):
     for name in ("production_forecast", "reconciliation_metrics", "backtest_forecasts", "allocation", "drift", "safety_stock"):
         assert (extract / f"{name}.parquet").exists()
     assert json.loads((extract / "run_summary.json").read_text())["served_method"]
+
+
+def test_safety_stock_has_segments_fill_rate_and_shelf_minimum(synthetic_root):
+    cfg = Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False, presentation_min=2.0, case_pack=3)
+    run(cfg)
+    safety = pd.read_parquet(synthetic_root / "data" / "gold" / "safety_stock.parquet")
+    assert {"abc", "xyz", "protection_days", "expected_fill_rate", "service_level"} <= set(safety.columns)
+    assert (safety["order_up_to"] >= cfg.presentation_min - 1e-9).all()
+    assert np.allclose(safety["order_up_to"] % 3, 0) or np.allclose((safety["order_up_to"] % 3).round(6) % 3, 0)
+    assert safety["expected_fill_rate"].between(0, 1).all()
+    foods = safety[safety["cat_id"] == "FOODS"]["protection_days"].unique().tolist()
+    hobbies = safety[safety["cat_id"] == "HOBBIES"]["protection_days"].unique().tolist()
+    assert foods == [cfg.lead_time_days + cfg.review_days_by_category["FOODS"]]
+    assert hobbies == [cfg.lead_time_days + cfg.review_days_by_category["HOBBIES"]]
+    gold = synthetic_root / "data" / "gold"
+    assert (gold / "interval_coverage_segment.parquet").exists() and (gold / "probable_stockouts.parquet").exists()
+    assert (gold / "allocation_node_fill.parquet").exists()
+    backtest = pd.read_parquet(gold / "allocation_backtest.parquet")
+    assert {"units_lost", "lost_revenue", "min_node_fill"} <= set(backtest.columns)
+
+
+def test_pipeline_writes_decision_level_tables(synthetic_root):
+    cfg = Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False)
+    summary = run(cfg)
+    gold = synthetic_root / "data" / "gold"
+    decision = pd.read_parquet(gold / "decision_accuracy.parquet")
+    assert set(decision["window_days"]) <= {3, 8} and decision["wmape"].notna().any()
+    weekday = pd.read_parquet(gold / "weekday_bias.parquet")
+    assert set(weekday["weekday"]) == {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+    event = pd.read_parquet(gold / "event_accuracy.parquet")
+    assert {"event", "normal"} >= set(event["day_type"]) and {"item_wmape", "total_bias"} <= set(event.columns)
+    exceptions = pd.read_parquet(gold / "bias_exceptions.parquet")
+    assert {"tracking_signal", "direction", "weekly_impact"} <= set(exceptions.columns)
+    ci = summary["allocation_vs_pro_rata_ci"]["revenue_fulfilled"]
+    assert ci["lower"] <= ci["mean"] <= ci["upper"] and ci["n"] > 0
+
+
+def test_pipeline_twin_phase_writes_validated_tables(synthetic_root):
+    cfg = Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False, twin_reps=8)
+    summary = run(cfg)
+    gold = synthetic_root / "data" / "gold"
+    validation = pd.read_parquet(gold / "twin_validation.parquet")
+    assert set(validation["policy"]) == {"forecast_reorder", "last_week_reorder"} and "all" in set(validation["store_id"])
+    assert (validation["lower"] <= validation["upper"] + 1e-9).all()
+    assert set(validation["fold"]) == {"backtest_2", "holdout"}  # backtest_1 has no earlier calibration
+    frontier = pd.read_parquet(gold / "twin_frontier.parquet")
+    assert frontier.groupby("category")["recommended"].sum().eq(1).all()
+    grid = frontier[frontier["service_level"].notna()].sort_values(["category", "service_level"])
+    for _, group in grid.groupby("category"):
+        assert group["inventory_value"].is_monotonic_increasing
+    stress = pd.read_parquet(gold / "twin_stress.parquet")
+    lost = stress[(stress["metric"] == "lost_sales_value") & (stress["policy"] == "forecast_reorder")]
+    assert (lost["delta"] >= -1e-6).all()  # a shock never reduces lost sales
+    exceptions = pd.read_parquet(gold / "twin_exceptions.parquet")
+    assert exceptions["expected_lost_value"].is_monotonic_decreasing
+    assert not pd.read_parquet(gold / "twin_timeline.parquet").empty
+    assert {"fill_rate", "recommended_service", "share_realised_in_band", "typical_miss"} <= set(summary["twin"])
+    assert 0 <= summary["twin"]["typical_miss"]["fill_rate"] <= 1
+
+
+def test_replay_scores_weekly_cycle_and_stability(synthetic_root):
+    from forecasting.replay import run_replay
+
+    cfg = Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False)
+    table = run_replay(cfg, weeks=3)
+    assert table["week"].tolist() == [1, 2, 3]
+    assert table["stability_vs_previous_run"].iloc[0] != table["stability_vs_previous_run"].iloc[0]  # first run has no predecessor (NaN)
+    assert (table["stability_vs_previous_run"].iloc[1:] >= 0).all()
+    assert table["next_week_wmape"].notna().all()
+
+
+def test_override_fva_and_temporal_options_run(synthetic_root):
+    cfg = Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False, twin=False, temporal=True)  # temporal is opt-in
+    run(cfg)
+    gold = synthetic_root / "data" / "gold"
+    fva = pd.read_parquet(gold / "override_fva.parquet")
+    assert set(fva["scope"]) == {"flagged products", "all products"} and {"fva", "n"} <= set(fva.columns)
+    models = pd.read_parquet(gold / "model_metrics.parquet")
+    assert {"sarima", "sarima_daily_only"} <= set(models["model"])
+
+
+def test_twin_bundles_load_without_pickle(synthetic_root):
+    """The API and the browser (Pyodide) load these with allow_pickle=False, so no object arrays are allowed."""
+    import numpy as np
+    from forecasting import twin
+
+    cfg = Config(root=synthetic_root, history_days=200, n_backtest_folds=2, n_estimators=10, prophet=False, mlflow=False, twin_reps=6)
+    run(cfg)
+    files = sorted((synthetic_root / "data" / "dashboard" / "twin_inputs").glob("*.npz"))
+    assert files
+    with np.load(files[0], allow_pickle=False) as data:
+        bundle = {key: data[key] for key in data.files}
+    assert {"past_actual", "past_forecast", "forecast", "safety_by_service", "current_safety", "dept_ids"} <= set(bundle)
+    bundle = {key: (value.item() if value.ndim == 0 else value) for key, value in bundle.items()}
+    bundle.pop("dates"), bundle.pop("item_ids")
+    result = twin.simulate_bundle(bundle, {"reps": 4, "seed": 1, "scenario": {"demand_scale": 1.4, "days": [3, 10]}})
+    assert result["scenario"]["kpis"]["lost_sales_value"]["mean"] >= result["baseline"]["kpis"]["lost_sales_value"]["mean"] - 1e-9

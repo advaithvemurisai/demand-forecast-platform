@@ -64,3 +64,25 @@ def test_bottom_up_totals():
     result = bottom_up(frame)
     assert result.query("level == 'total'")["forecast"].iloc[0] == 10
     assert result.query("level == 'store'")["forecast"].sum() == 10
+
+
+def test_temporal_reconcile_moves_weekly_total_toward_the_more_reliable_forecast():
+    from forecasting.reconciliation import temporal_reconcile
+
+    daily = np.full((1, 14), 10.0)  # weekly total 70
+    weekly = np.array([[84.0, 56.0]])
+    near_weekly = temporal_reconcile(daily, weekly, np.array([100.0]), np.array([1e-6]))
+    np.testing.assert_allclose(near_weekly.reshape(2, 7).sum(axis=1), [84.0, 56.0], rtol=1e-4)
+    near_daily = temporal_reconcile(daily, weekly, np.array([1e-6]), np.array([100.0]))
+    np.testing.assert_allclose(near_daily, daily, rtol=1e-3)
+    balanced = temporal_reconcile(daily, weekly, np.array([10.0]), np.array([70.0])).reshape(2, 7).sum(axis=1)
+    assert 70 < balanced[0] < 84 and 56 < balanced[1] < 70
+
+
+def test_temporal_reconcile_validates_shape_and_stays_non_negative():
+    from forecasting.reconciliation import temporal_reconcile
+
+    with pytest.raises(ValueError):
+        temporal_reconcile(np.ones((1, 10)), np.ones((1, 1)), np.ones(1), np.ones(1))
+    out = temporal_reconcile(np.full((1, 7), 1.0), np.array([[-50.0]]), np.array([1.0]), np.array([1e-9]))
+    assert (out >= 0).all()

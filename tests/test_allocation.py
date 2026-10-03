@@ -46,3 +46,23 @@ def test_min_fill_floor_and_infeasible():
     assert result.loc[0, "allocated_quantity"] >= 3 - 1e-8
     with pytest.raises(ValueError):
         allocate_inventory(demand, 5, min_fill=0.5)
+
+
+def test_min_fill_stops_low_value_node_being_starved():
+    demand = pd.DataFrame({"forecast": [10.0, 10.0], "unit_value": [0.1, 5.0]})
+    starved = allocate_inventory(demand, 10, value_column="unit_value")
+    floored = allocate_inventory(demand, 10, value_column="unit_value", min_fill=0.4)
+    assert starved.loc[0, "allocated_quantity"] == pytest.approx(0.0)
+    assert floored.loc[0, "allocated_quantity"] >= 4 - 1e-8
+
+
+def test_fairness_violations_flags_only_long_short_runs():
+    from forecasting.allocation import fairness_violations
+
+    fill = pd.DataFrame({
+        "node_id": ["a"] * 5 + ["b"] * 5,
+        "fill_rate": [0.1, 0.2, 0.3, 0.9, 0.9] + [0.1, 0.9, 0.1, 0.9, 0.1],
+    })
+    flagged = fairness_violations(fill, floor=0.5, max_weeks=2)
+    assert flagged["node_id"].tolist() == ["a"]
+    assert flagged["longest_short_run"].tolist() == [3]

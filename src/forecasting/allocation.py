@@ -86,3 +86,20 @@ def proportional_allocation(demand: pd.DataFrame, inventory: float, quantity_col
     """Benchmark rule: split supply pro rata to the point forecast."""
     point = demand[quantity_column].to_numpy(dtype=float)
     return point / point.sum() * inventory if point.sum() else np.zeros(len(point))
+
+
+def fairness_violations(fill: pd.DataFrame, floor: float = 0.5, max_weeks: int = 2) -> pd.DataFrame:
+    """Nodes whose fill rate stayed below ``floor`` for more than ``max_weeks`` consecutive weeks.
+
+    ``fill`` has one row per (node_id, period) with a ``fill_rate`` column, ordered by period.
+    Returns one row per offending node with its longest run of short weeks.
+    """
+    rows = []
+    for node, group in fill.groupby("node_id", sort=False):
+        longest = run = 0
+        for short in (group["fill_rate"].to_numpy() < floor - 1e-9):
+            run = run + 1 if short else 0
+            longest = max(longest, run)
+        if longest > max_weeks:
+            rows.append({"node_id": node, "longest_short_run": longest})
+    return pd.DataFrame(rows, columns=["node_id", "longest_short_run"])

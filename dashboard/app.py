@@ -292,9 +292,8 @@ with tabs[3]:
     st.plotly_chart(style(fig, 400, "Units for the week").update_layout(legend_y=-0.2), width="stretch")
     st.caption(
         "Stock is allocated to 28 targets, 7 departments in each of 4 stores, all drawing on the same DC supply; this chart shows one store. "
-        "Labels give each department's average selling price. The LP is revenue-weighted with no minimum-fill floor, so under a 10% "
-        "shortfall it can give the cheapest department (HOBBIES_2) nothing. `allocate_inventory(..., min_fill=...)` adds a service "
-        "floor when that is unacceptable."
+        "Labels give each department's average selling price. The LP maximises expected margin (assumed by category) and holds every "
+        "department to at least half its forecast, so none is starved; see `allocate_inventory(..., min_fill=...)`."
     )
 
     weekly = alloc_bt.pivot_table(index=["fold", "week"], columns="policy", values="revenue_fulfilled").reset_index()
