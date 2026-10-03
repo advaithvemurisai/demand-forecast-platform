@@ -73,15 +73,14 @@ export default function Overview() {
             {stress && (
               <section>
                 <h2>Try a scenario</h2>
-                <p className="muted small">Each opens the simulator with that disruption applied to all four stores and the warehouse.</p>
+                <p className="muted small">Each opens the simulator with that disruption applied to the next four weeks, across all four stores and the warehouse.</p>
                 <div className="launch">
                   {LAUNCH.filter(({ key }) => stress.some((row) => row.scenario === key)).map(({ key, title }) => {
-                    const row = stress.find((r) => r.scenario === key && r.policy === 'forecast_reorder' && r.metric === 'lost_sales_value' && (r.rationing ?? 'days_of_cover') === 'days_of_cover')
+                    const row = stress.find((r) => r.scenario === key)
                     return (
                       <a key={key} className="preset" href={`#/twin?scenario=${key}`}>
                         <strong>{title}</strong>
                         <span>{row?.label.replace(/^[^:]*:\s*/, '')}</span>
-                        {row && <span className="num"> · {row.delta >= 0 ? '+' : ''}{usd(row.delta)} lost sales</span>}
                       </a>
                     )
                   })}
@@ -263,7 +262,7 @@ function Health({ rows }: { rows: InventoryHealthRow[] }) {
       <div className="grid kpis">
         <Kpi label="Weeks of supply" value={total.weeks_of_supply.toFixed(1)} tone="flat" note={`${total.store_weeks_of_supply.toFixed(1)} in stores + ${(total.weeks_of_supply - total.store_weeks_of_supply).toFixed(1)} in the warehouse, at cost`} />
         <Kpi label="Inventory turns" value={`${total.turns.toFixed(1)}× a year`} tone="flat" note={`GMROI ${total.gmroi.toFixed(2)}: ${usd(total.gmroi)} of gross margin a year per $1 of stock (assumed margins)`} />
-        <Kpi label="Lost sales" value={`${pct(total.lost_share)} of demand`} tone="flat" note={`${usd(total.lost_sales_value)} over 4 weeks against ${usd(total.sales_value)} sold`} />
+        <Kpi label="Lost sales" value={`${pct(total.lost_share)} of demand`} tone="flat" note={`Demand that found an empty shelf, against ${usd(total.sales_value)} sold over the 4 weeks`} />
         <Kpi label="Warehouse" value={`${pct(total.dc_fill_rate ?? NaN)} of store orders filled`} tone="flat"
           note={`${usd(total.dc_inventory_value ?? NaN)} on hand, ${usd(total.dc_on_order_value ?? NaN)} on order from the supplier`} />
       </div>

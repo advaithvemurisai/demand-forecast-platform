@@ -30,6 +30,9 @@ export const usd = (value: number): string => {
   return `${sign}$${abs.toFixed(0)}`
 }
 export const signedUsd = (value: number): string => (value > 0 ? `+${usd(value)}` : usd(value))
+/** "2016-05-23" -> "23 May" (dates are ISO strings in the data; formatted in UTC so the day never shifts). */
+export const shortDate = (iso: string): string =>
+  new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
 export const points = (value: number, digits = 1): string => `${value >= 0 ? '+' : '−'}${Math.abs(value * 100).toFixed(digits)} pts`
 
 /** "department:dept_id=FOODS_3|store_id=CA_1" -> "dept: FOODS_3 · store: CA_1"; the state total reads "All CA stores". */

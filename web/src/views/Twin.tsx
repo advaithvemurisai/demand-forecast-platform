@@ -8,7 +8,7 @@ import type {
 import { Async, ChartBox, CsvButton, Kpi, Problem, Segmented, Select, type Tone } from '../components/ui'
 import { useData } from '../components/data'
 import { axisProps, gridProps, SERIES, tooltipStyle } from '../lib/chart'
-import { POLICY_LABELS, RATIONING_LABELS, num, pct, points, signedPct, signedUsd, usd } from '../lib/format'
+import { POLICY_LABELS, RATIONING_LABELS, num, pct, points, shortDate, signedPct, signedUsd, usd } from '../lib/format'
 import { bestResponse, mean } from '../lib/metrics'
 import { runSimulation, STAGE_LABELS, warmSimulator, type Stage } from '../twin/client'
 
@@ -94,7 +94,7 @@ function WhatIf({ index }: { index: TwinPresetIndex }) {
       <h2>1 · What if…?</h2>
       <p className="answer">
         {shown?.result.scenario
-          ? <>{shown.label}: lost sales {signedUsd(kpis(shown.result.scenario).lost_sales_value.mean - kpis(shown.result.baseline).lost_sales_value.mean)} over the 4 weeks {where},
+          ? <>{shown.label}: lost sales {signedUsd(kpis(shown.result.scenario).lost_sales_value.mean - kpis(shown.result.baseline).lost_sales_value.mean)} over the next four weeks ({shortDate(index.dates[0])} to {shortDate(index.dates[index.dates.length - 1])}) {where},
             and fill rate moves {points(kpis(shown.result.scenario).fill_rate.mean - kpis(shown.result.baseline).fill_rate.mean)}.</>
           : 'Pick a scenario to compare it with business as usual.'}
       </p>
@@ -324,7 +324,7 @@ function Responses({ rows, summary }: { rows: TwinResponseRow[]; summary: Summar
       <h2>What would we do about it?</h2>
       <p className="answer">{responseVerdict(rows, ordered)}</p>
       <p className="muted small">
-        Each response is simulated against the same futures as the disruption. Cost = expedite or second-supplier premium (assumed) + extra holding at the stores and warehouse.
+        Tested on the four holdout weeks (the window the simulator was validated on), so the figures differ a little from the what-if above, which looks forward. Each response is simulated against the same futures as the disruption. Cost = expedite or second-supplier premium (assumed) + extra holding at the stores and warehouse.
         Net benefit = lost margin recovered (corrected for the simulator’s {bias ? `${bias.toFixed(1)}× ` : ''}overstatement of lost sales) minus that cost; a response is worth it when its 90% range is above zero.
       </p>
       <div className="table-wrap stack">

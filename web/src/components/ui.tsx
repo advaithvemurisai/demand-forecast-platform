@@ -19,7 +19,8 @@ export function Async<T>({ state, children }: { state: { data?: T; error?: strin
 }
 
 export function Kpi({ label, value, delta, tone = 'flat', note }: { label: string; value: string; delta?: string; tone?: Tone; note?: string }) {
-  const arrow = tone === 'good' ? '▲ ' : tone === 'bad' ? '▼ ' : ''
+  // The arrow shows direction (from the delta's sign); the colour shows whether that direction is good.
+  const arrow = delta?.startsWith('+') ? '▲ ' : /^[−-]/.test(delta ?? '') ? '▼ ' : ''
   return (
     <div className="card kpi">
       <span className="label">{label}</span>

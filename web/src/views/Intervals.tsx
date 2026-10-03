@@ -41,7 +41,7 @@ export default function Intervals() {
               <ScatterChart margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
                 <CartesianGrid {...gridProps} />
                 <XAxis type="category" dataKey="level" allowDuplicatedCategory={false} {...axisProps} />
-                <YAxis type="number" dataKey="coverage" domain={[0.6, 1.02]} tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`} {...axisProps} width={48} />
+                <YAxis type="number" dataKey="coverage" domain={[0.6, 1]} ticks={[0.6, 0.7, 0.8, 0.9, 1]} tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`} {...axisProps} width={48} />
                 <Tooltip {...tooltipStyle} formatter={(v: unknown) => pct(Number(v))} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 {series.map((s, i) => <ReferenceLine key={`ref${s.nominal}`} y={s.nominal} stroke={SERIES[i]} strokeDasharray="3 3" />)}

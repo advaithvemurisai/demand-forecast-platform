@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nodeLabel, num, pct, relativeGap, signedPct, storeOf, usd } from './format'
+import { nodeLabel, num, pct, relativeGap, shortDate, signedPct, storeOf, usd } from './format'
 
 describe('format', () => {
   it('formats percentages with explicit signs', () => {
@@ -23,5 +23,12 @@ describe('format', () => {
     expect(gaps[1]).toBe(0)
     expect(gaps[0]).toBeCloseTo(1)
     expect(gaps[2]).toBeCloseTo(0.5)
+  })
+})
+
+describe('shortDate', () => {
+  it('formats ISO dates without shifting the day', () => {
+    expect(shortDate('2016-05-23')).toBe('23 May')
+    expect(shortDate('2016-06-19T00:00:00')).toBe('19 Jun')
   })
 })

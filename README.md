@@ -109,7 +109,7 @@ Every response cuts the loss, but at grocery margins (25–40%, assumed) none cl
 
 How the warehouse shares a short product barely matters: by days of cover, proportionally or by value, each rule loses about $8.2k. Each product's shortfall is split between just four stores with similar cover.
 
-**How far to trust it.** The predicted network fill rate is within 1.1 points of reality on average (holdout: 96.8% predicted vs 97.0% realised). Its 90% ranges are still too narrow, though: the realised value fell inside them in 5 of 24 network checks. Predicted dollar losses run about 1.6× high, because predicted demand is ~8% above observed sales, which stockouts themselves hold down. Read dollar figures as comparisons between policies, not as forecasts. It also assumes perfect store execution: every unit that reaches a store is on the shelf, whereas two-thirds to three-quarters of real stockouts start in the store. Its 98.5% in-stock rate is a ceiling, not a prediction (studies put the average out-of-stock rate near 8%).
+**How far to trust it.** The predicted network fill rate is within 1.1 points of reality on average (holdout: 96.8% predicted vs 97.0% realised). Its 90% ranges are still too narrow, though: the realised value fell inside them in 5 of 27 network checks. Predicted dollar losses run about 1.6× high, because predicted demand is ~8% above observed sales, which stockouts themselves hold down. Read dollar figures as comparisons between policies, not as forecasts. It also assumes perfect store execution: every unit that reaches a store is on the shelf, whereas two-thirds to three-quarters of real stockouts start in the store. Its simulated in-stock rate of about 98.6% is a ceiling, not a prediction (studies put the average out-of-stock rate near 8%).
 
 ## Honest limitations
 
@@ -130,7 +130,7 @@ How the warehouse shares a short product barely matters: by days of cover, propo
 - **Backtests, then a holdout.** Three rolling 28-day backtests, then a final 28-day holdout. Model and reconciliation choices use backtests only.
 - **Decision-level accuracy.** Forecasts are also scored over each product's replenishment window, with bias by weekday and event days and a tracking-signal list of products the forecast keeps missing in one direction.
 - **Allocation backtest.** Weekly allocations are scored on realised sales, with stores carrying stock from week to week, and reported with a 95% confidence interval.
-- **Tests.** 109 Python tests, including closed-form newsvendor checks, unit conservation, every planner response and a full synthetic pipeline run. 15 web tests, including the Pyodide/CPython parity check. CI runs everything on every push.
+- **Tests.** 109 Python tests, including closed-form newsvendor checks, unit conservation, every planner response and a full synthetic pipeline run. 16 web tests, including the Pyodide/CPython parity check. CI runs everything on every push.
 
 ## Repository layout
 
@@ -156,7 +156,7 @@ data/dashboard/      committed results extract the app and API read
 python -m pip install -e ".[prophet,api,data,dev]"   # macOS: brew install libomp
 python scripts/download_data.py                      # downloads and verifies the M5 data
 python -m forecasting --states CA                    # prepare the data
-python -m forecasting.pipeline                       # full run, ~25 min on a laptop
+python -m forecasting.pipeline                       # full run, ~17 min on a laptop (much longer on battery)
 python -m pytest -q
 
 # web app
