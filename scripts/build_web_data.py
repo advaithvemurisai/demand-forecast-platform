@@ -82,7 +82,8 @@ def build(source: Path, out: Path, web: Path) -> dict[str, int]:
     for name in ("reconciliation_metrics", "model_metrics", "interval_coverage", "allocation", "allocation_backtest", "drift"):
         sizes[f"{name}.json"] = write_json(data / f"{name}.json", records(read(source, name)))
     for name in ("interval_coverage_segment", "allocation_node_fill", "decision_accuracy", "weekday_bias", "event_accuracy", "bias_exceptions",
-                 "override_fva", "probable_stockouts", "twin_validation", "twin_timeline", "twin_frontier", "twin_policy_curve", "twin_stress", "twin_exceptions"):
+                 "override_fva", "probable_stockouts", "twin_validation", "twin_timeline", "twin_frontier", "twin_policy_curve", "twin_stress", "twin_exceptions",
+                 "twin_responses", "inventory_health", "twin_frontier_speed"):
         frame = read(source, name, required=False)
         if frame is not None:
             sizes[f"{name}.json"] = write_json(data / f"{name}.json", records(frame))

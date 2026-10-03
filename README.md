@@ -19,8 +19,10 @@ All figures are from a holdout window that was never used for any modelling choi
 | Can the forecast ranges be trusted? | 95% ranges contain 94.1% of actual product sales, out of sample |
 | What does the safety stock buy? | Fill rate **87.3% → 97.0%**; **$188k less lost sales** over four weeks for $9.9k of holding cost |
 | When the warehouse is short, does smarter allocation pay? | About **$91k a year** more revenue than a proportional split; won 11 of 12 test weeks |
-| Are today's service targets right? | Not quite: Foods 98%, Hobbies 99%, Household 99.5% saves about $31k a year |
+| Are today's service targets right? | Nearly: Foods **down** to 95% (frees $24k of stock) and Hobbies up to 98% save about $11k a year; Household stays. Raising every target only pays if every stockout is a lost sale |
 | What is the biggest operational risk? | Supplier lead time: doubling it costs about $44k of sales over four weeks, even when the planner adjusts after a week |
+| What should we do about it? | Plan on the longer lead time at once: the loss falls to $19k for $3.7k of extra holding, roughly break-even on margin. Expediting and pre-building cost more than they save |
+| How healthy is the stock? | 2.9 weeks of supply (1.3 in stores, 1.5 in the warehouse), 18 turns a year, lost sales 3.0% of demand, but **60% of lost sales come from slow and sporadic sellers** (13% of sales) |
 
 ## The finding I didn't expect
 
@@ -30,6 +32,8 @@ The first version compared forecast-based reordering with "last week's sales" an
 - To match it, reordering from last week's sales needs about **3% more stock**.
 
 Over a 3–8 day replenishment window, last week's sales rate is already a fair estimate for most products. **The value comes from calibrated safety stock, not from forecast-based reordering**, and the app and this README now say so. The simulator also plots fill rate against inventory for both policies, so they are compared at equal stock instead of at one hand-picked setting.
+
+A second review caught the same kind of bias in the service-target advice. The first version said to raise every category's target, Household to 99.5% (+$141k of stock to save $1.5k a month). But the cost curve priced every unmet unit as a lost sale, while the app's own validation shows the simulator overstates lost sales 1.6×, and shoppers facing an empty shelf mostly substitute or come back (only ~40% of stockouts lose the sale, per Gruen & Corsten's 29-country study). Since the optimal service level is shortage cost ÷ (shortage + overstock cost), that overstatement pushes every target up. **Corrected for the measured bias, Foods should go down to 95%, Hobbies up to 98%, and Household stays.** The app now shows the answer under all three stockout-cost assumptions, with the stock each one needs and a capital-limited option.
 
 ## The business problem
 
@@ -76,6 +80,8 @@ What makes it more than a toy:
 - **Realistic warehouse policy.** Its safety stock pools the stores' demand risk (square-root law) and covers a supplier lead time that varies from order to order.
 - **Correlated demand.** Each simulated future replays a past week of real sales shared by every product and store, so a bad week hits the whole network at once.
 - **Costs at cost.** Inventory and holding cost use unit cost, not shelf price, with higher holding rates for perishable food.
+- **A visible warehouse.** Its stock, orders in transit from the supplier and fill rate are reported for every scenario.
+- **Responses, not just risks.** Each disruption can be met with a costed response: replan at once, pre-build, expedite only the gap, a second supplier, or putting a known spike in the forecast.
 - **Validated against history.** For each past window it predicts service levels from forecast data alone, then replays what actually sold.
 - **One engine everywhere.** The pipeline, the API and the browser run the same numpy-only file, [`twin.py`](src/forecasting/twin.py). The browser runs it through Pyodide, and a test checks the two agree to 1e-6.
 
@@ -88,15 +94,30 @@ What makes it more than a toy:
 | One supplier delivery a week late | $15k | $10k – $23k |
 | Warehouse receives 30% less for two weeks | $8k | $4k – $13k |
 
+**What to do about it.** Each disruption is re-run with the responses a planner has, on the same futures, and each is charged for its cost (assumed premiums plus extra holding at the stores and warehouse):
+
+| Response | Extra lost sales | Cost | Net of margin recovered |
+|---|---|---|---|
+| Supplier slowdown, plan on 14 days at once | $44k → $19k | $3.7k | +$0.6k (within noise) |
+| Supplier slowdown, expedite only what bridges the gap (+20%) | $44k → $20k | $42k | −$38k |
+| Supplier slowdown, pre-build a week of warehouse stock | $44k → $2.5k | $12k | −$5k |
+| Late delivery, expedite the gap | $15k → $12k | $4.0k | −$3.4k |
+| Warehouse cut, second supplier for half (+10%) | $8k → $3k | $11k | −$10k |
+| Holiday spike, put it in the forecast | $21k → $10k | $3.3k | −$1.6k |
+
+Every response cuts the loss, but at grocery margins (25–40%, assumed) none clearly pays for its premiums and holding. The cheap fix is faster replanning, not more stock or faster freight.
+
 How the warehouse shares a short product barely matters: by days of cover, proportionally or by value, each rule loses about $8.2k. Each product's shortfall is split between just four stores with similar cover.
 
-**How far to trust it.** The predicted network fill rate is within 1.1 points of reality on average (holdout: 96.8% predicted vs 97.0% realised). Its 90% ranges are still too narrow, though: the realised value fell inside them in 5 of 24 network checks. Predicted dollar losses run about 1.7× high, because predicted demand is ~8% above observed sales, which stockouts themselves hold down. Read dollar figures as comparisons between policies, not as forecasts.
+**How far to trust it.** The predicted network fill rate is within 1.1 points of reality on average (holdout: 96.8% predicted vs 97.0% realised). Its 90% ranges are still too narrow, though: the realised value fell inside them in 5 of 24 network checks. Predicted dollar losses run about 1.6× high, because predicted demand is ~8% above observed sales, which stockouts themselves hold down. Read dollar figures as comparisons between policies, not as forecasts. It also assumes perfect store execution: every unit that reaches a store is on the shelf, whereas two-thirds to three-quarters of real stockouts start in the store. Its 98.5% in-stock rate is a ceiling, not a prediction (studies put the average out-of-stock rate near 8%).
 
 ## Honest limitations
 
 - **M5 has no inventory, lead-time, cost or case-pack data.** Starting stock, lead times and their spread, margins (which set unit costs) and holding rates are stated assumptions in `pipeline.Config` and `TwinConfig`. The warehouse → store leg has a fixed one-day lead time.
 - **M5 records sales, not demand.** A zero can mean no demand or no stock. Probable stockouts are masked for steady sellers (≈4% of days), but some censoring remains, so accuracy is measured against sales that are themselves censored.
 - **Product-level accuracy is modest.** Daily WMAPE is 0.74 (0.30–0.36 for fast sellers over their replenishment window, above 1.0 for sporadic ones).
+- **The long tail is under-forecast and under-served.** Slow and sporadic sellers are under-forecast 9–34% and fill 92% and 60% of demand in the holdout replay. Raising slow sellers to a 95% target pays; for sporadic sellers the simulated futures (93% fill) miss the replay so badly that the simulator can't price their target yet.
+- **Stockout cost is an assumption.** The headline advice corrects for the simulator's measured 1.6× overstatement of lost sales; the app shows the answer with and without that correction and with a shopper-substitution adjustment.
 - **Aggregate ranges under-cover.** At 95% nominal, store and category coverage is about 92.5%.
 - **Allocation is planned by department** (28 store × department targets). Product-level sharing happens inside the twin.
 - **Things that didn't help are reported and switched off:**
@@ -109,7 +130,7 @@ How the warehouse shares a short product barely matters: by days of cover, propo
 - **Backtests, then a holdout.** Three rolling 28-day backtests, then a final 28-day holdout. Model and reconciliation choices use backtests only.
 - **Decision-level accuracy.** Forecasts are also scored over each product's replenishment window, with bias by weekday and event days and a tracking-signal list of products the forecast keeps missing in one direction.
 - **Allocation backtest.** Weekly allocations are scored on realised sales, with stores carrying stock from week to week, and reported with a 95% confidence interval.
-- **Tests.** 105 Python tests, including closed-form newsvendor checks, unit conservation and a full synthetic pipeline run. 14 web tests, including the Pyodide/CPython parity check. CI runs everything on every push.
+- **Tests.** 109 Python tests, including closed-form newsvendor checks, unit conservation, every planner response and a full synthetic pipeline run. 15 web tests, including the Pyodide/CPython parity check. CI runs everything on every push.
 
 ## Repository layout
 
@@ -121,7 +142,7 @@ src/forecasting/
   allocation.py      scenario LP (PuLP + HiGHS)
   stockouts.py       probable-stockout detection
   twin.py            the inventory simulator (numpy only; also runs in the browser)
-  twin_runs.py       validation, cost curves, policy curves, stress tests, watch-list
+  twin_runs.py       validation, cost curves, policy curves, stress tests and responses, stock health, watch-list
 web/                 React + Vite + TypeScript app; simulator in a Pyodide web worker
 api/                 FastAPI service: forecasts, metrics, live what-if simulations
 notebooks/           walkthrough of every result

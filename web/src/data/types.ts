@@ -30,6 +30,11 @@ export interface Summary {
     service_at_grid_edge?: string[]
     service_saving?: Record<string, { saving: number; lower: number; upper: number; clear: boolean }>
     current_service_cost?: Record<string, number>
+    /** The lost-sale assumption the headline service advice uses (see TwinFrontierRow.assumption). */
+    service_assumption?: string
+    /** Simulated / realised lost sales across validation windows. */
+    lost_sales_bias?: number | null
+    service_by_assumption?: Record<string, Record<string, { service: number; saving: number; clear: boolean; inventory_change: number }>>
     stress_added_lost_sales: Record<string, number>
     stress_added_lost_sales_band?: Record<string, [number, number]>
     /** Realised holdout: forecast policy minus current practice, per metric. */
@@ -88,6 +93,7 @@ export interface TwinValidationRow {
 }
 export interface TwinTimelineRow { date: string; store_id: string; dept_id: string; policy: string; on_hand: number; demand: number; lost: number }
 export interface TwinFrontierRow {
+  assumption: string; assumption_label: string; lost_scale: number; inventory_change: number; within_budget: boolean
   category: string; service_level: number | null; label: string; fill_rate: number; in_stock_pct: number; inventory_value: number
   lost_sales_value: number; lost_margin: number; holding_cost: number; total_cost: number; total_cost_lower: number; total_cost_upper: number; recommended: boolean
   saving_vs_current: number; saving_lower: number; saving_upper: number; clear_saving: boolean; at_grid_edge: boolean
@@ -98,7 +104,18 @@ export interface TwinStressRow {
 }
 export interface TwinPolicyCurveRow {
   policy: string; safety_multiplier: number; fill_rate: number; in_stock_pct: number; lost_sales_value: number; lost_margin: number
-  inventory_value: number; holding_cost: number; units_lost: number; units_demanded: number
+  inventory_value: number; holding_cost: number; units_lost: number; units_demanded: number; sales_value?: number
+}
+export interface TwinResponseRow {
+  scenario: string; scenario_label: string; response: string; label: string; detail: string
+  added_lost_sales: number; added_lost_sales_lower: number; added_lost_sales_upper: number
+  response_cost: number; response_cost_lower: number; response_cost_upper: number
+  net_benefit: number; net_benefit_lower: number; net_benefit_upper: number; dc_fill_rate: number; premium: number
+}
+export interface InventoryHealthRow {
+  group_type: 'category' | 'speed'; group: string; fill_rate: number; in_stock_pct: number; sales_value: number; lost_sales_value: number; lost_share: number
+  store_inventory_value: number; dc_inventory_value: number | null; store_weeks_of_supply: number; weeks_of_supply: number; turns: number; gmroi: number
+  dc_fill_rate: number | null; dc_on_order_value: number | null
 }
 export interface TwinExceptionRow {
   series_id: string; item_id: string; dept_id: string; cat_id: string; store_id: string
@@ -110,7 +127,9 @@ export type KpiSet = Record<string, KpiBand>
 /** Timeline columns are "STORE|DEPT" groups for a network run. */
 export interface TwinTimelineSet { group: string[]; on_hand: number[][]; demand: number[][]; lost: number[][] }
 /** KPIs for the network ("all") and for each store. */
-export interface TwinOutcome { kpis: Record<string, KpiSet>; timeline: TwinTimelineSet }
+/** Warehouse stock and stock on order from the supplier, at cost, per day (mean of the futures). */
+export interface TwinDcTimeline { on_hand: number[]; on_order: number[] }
+export interface TwinOutcome { kpis: Record<string, KpiSet>; timeline: TwinTimelineSet; dc?: TwinDcTimeline }
 export interface TwinResult { policy: string; service: string | number; reps: number; stores: string[]; baseline: TwinOutcome; scenario: TwinOutcome | null }
 export interface TwinPresetIndex {
   stores: string[]
@@ -123,6 +142,7 @@ export interface TwinPresetIndex {
 export interface TwinScenario {
   demand_scale?: number; category?: string | null; days?: [number, number] | null
   dc_factor?: number; dc_days?: [number, number] | null; delay?: number; delay_days?: [number, number] | null; replan_after?: number | null
+  planned?: boolean; prebuild_days?: number; expedite_share?: number; backup_share?: number; premium?: number
 }
 export interface TwinRequest {
   policy: string; service: 'current' | number; rationing: string; scenario: TwinScenario | null; reps: number; seed: number

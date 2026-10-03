@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react'
 import { ResponsiveContainer } from 'recharts'
+import { downloadCsv, toCsv, type CsvColumn } from '../lib/csv'
 
 export type Tone = 'good' | 'bad' | 'flat'
 
@@ -71,4 +72,13 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error?: 
   render() {
     return this.state.error ? <Problem message={this.state.error.message} /> : this.props.children
   }
+}
+
+/** A small "Download CSV" button for a decision table. */
+export function CsvButton<T>({ filename, rows, columns, label = 'Download CSV' }: { filename: string; rows: T[]; columns: CsvColumn<T>[]; label?: string }) {
+  return (
+    <button type="button" className="csv" onClick={() => downloadCsv(filename, toCsv(rows, columns))} disabled={rows.length === 0}>
+      {label} <span className="muted">({rows.length.toLocaleString()} rows)</span>
+    </button>
+  )
 }

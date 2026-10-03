@@ -155,3 +155,11 @@ a.preset:hover { border-color: var(--accent); }
   .chart { height: 300px; }
 }
 details > summary { cursor: pointer; font-weight: 600; margin: 10px 0; }
+
+.csv { font: inherit; font-size: .84rem; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); cursor: pointer; }
+.csv:hover { border-color: var(--accent); }
+.csv:disabled { opacity: .5; cursor: default; }
+.table-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 14px 0 6px; }
+.table-head h3 { margin: 0; }
+.health td.num.warn { color: var(--warn); }
+.group-row td { background: var(--accent-soft); }

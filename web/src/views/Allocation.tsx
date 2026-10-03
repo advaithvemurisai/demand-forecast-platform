@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, Tooltip, XAxis, YAxis } from 'recharts'
 import { getJson, getOptional } from '../data/load'
 import type { AllocationBacktestRow, AllocationRow, SafetyRow, Summary } from '../data/types'
-import { Async, ChartBox, Kpi, Question, Segmented } from '../components/ui'
+import { Async, ChartBox, CsvButton, Kpi, Question, Segmented } from '../components/ui'
 import { useData } from '../components/data'
 import { axisProps, gridProps, SERIES, tooltipStyle } from '../lib/chart'
 import { num, pct, signedPct, usd } from '../lib/format'
@@ -33,11 +33,13 @@ export default function Allocation() {
           <>
             <Question>when the warehouse can’t cover every store’s demand, who gets the stock?</Question>
             <p>
-              <strong>Week of {allocation[0].week_start}.</strong> The warehouse can ship {num(allocation[0].supply)} units, 90% of the week’s forecast demand. Both rules allocate against
+              <strong>Week of {allocation[0].week_start}.</strong> The warehouse can ship {num(allocation[0].supply)} units, {supplyShare(allocation)} of the stores’ combined net need. Both rules allocate against
               <em> net need</em>: forecast plus safety stock, minus what each store already holds
               {allocation[0].on_hand_source ? <> (starting stock from the {allocation[0].on_hand_source})</> : null}. The scenario LP maximises expected <em>margin</em> over conformal demand
               scenarios, with every department’s stock held to at least half its forecast; “pro-rata” splits supply in proportion to net need.
             </p>
+            <div className="callout"><strong>Simulated constraint.</strong> <span className="muted">The data has no warehouse stock, so a shortfall is imposed every week: supply is set to {supplyShare(allocation)} of net need
+              to test how each rule shares scarce stock. It is a stress test, not a forecast of real shortages.</span></div>
             <div className="controls"><Segmented label="Store" value={store} options={stores.map((s) => ({ value: s, label: s }))} onChange={setStore} /></div>
             <ChartBox size="tall">
               <ComposedChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
@@ -52,6 +54,15 @@ export default function Allocation() {
                 <Line dataKey="forecast" name="Forecast demand" stroke="var(--ink)" strokeWidth={0} dot={{ r: 5, fill: 'var(--ink)' }} isAnimationActive={false} />
               </ComposedChart>
             </ChartBox>
+            <div className="table-head">
+              <span className="muted small">Next week’s split for all {allocation.length} store × department targets</span>
+              <CsvButton filename={`allocation_${allocation[0].week_start}.csv`} rows={allocation} columns={[
+                { header: 'week_start', value: (r) => r.week_start }, { header: 'store_id', value: (r) => r.store_id }, { header: 'dept_id', value: (r) => r.dept_id },
+                { header: 'forecast_units', value: (r) => r.forecast }, { header: 'safety_stock_units', value: (r) => r.safety_stock }, { header: 'on_hand_units', value: (r) => r.on_hand },
+                { header: 'net_need_units', value: (r) => r.net_need }, { header: 'allocated_units_lp', value: (r) => r.allocated_quantity }, { header: 'allocated_units_pro_rata', value: (r) => r.pro_rata_quantity },
+                { header: 'unit_price', value: (r) => r.unit_value }, { header: 'expected_fill_rate', value: (r) => r.expected_fill_rate }, { header: 'stockout_risk', value: (r) => r.stockout_risk },
+              ]} />
+            </div>
             <p className="legend-note">
               Stock is allocated to 28 targets (7 departments × 4 stores) drawing on the same warehouse supply; this chart shows one store. Labels give each department’s average selling price.
               This is the weekly planning split by department; the <a href="#/twin?section=rationing">simulator</a> then shares each product’s stock between stores day by day.
@@ -88,7 +99,7 @@ export default function Allocation() {
                     <Bar dataKey="proLost" name="Pro-rata" fill={SERIES[1]} isAnimationActive={false} />
                   </BarChart>
                 </ChartBox>
-                <p className="legend-note">Revenue lost to unfilled demand each week. With supply at 90% of forecast some loss is unavoidable; the LP puts it where it costs least.</p>
+                <p className="legend-note">Revenue lost to unfilled demand each week. With supply held below need every week (the simulated constraint), some loss is unavoidable; the LP puts it where it costs least.</p>
               </>
             )}
 
@@ -98,7 +109,14 @@ export default function Allocation() {
                 Each item’s target covers its replenishment window (lead time + days between orders). Staples (class A, steady) are held to 98% service; the erratic long tail (C, Z) to 85%.
                 Order-up-to includes a two-unit shelf minimum.
               </p>
-              <div className="controls"><label className="field"><span>Filter items</span><input type="text" placeholder="e.g. FOODS_3_090" value={query} onChange={(e) => setQuery(e.target.value)} /></label></div>
+              <div className="controls">
+                <label className="field"><span>Filter items</span><input type="text" placeholder="e.g. FOODS_3_090" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+                <CsvButton filename="item_safety_stock.csv" label="Download all items" rows={safety.data ?? []} columns={[
+                  { header: 'item_id', value: (r) => r.item_id }, { header: 'store_id', value: (r) => r.store_id }, { header: 'dept_id', value: (r) => r.dept_id },
+                  { header: 'window_forecast_units', value: (r) => r.forecast }, { header: 'safety_stock_units', value: (r) => r.safety_stock }, { header: 'order_up_to_units', value: (r) => r.order_up_to },
+                  { header: 'service_target', value: (r) => r.service_level }, { header: 'expected_fill_rate', value: (r) => r.expected_fill_rate }, { header: 'abc_xyz_class', value: (r) => (r.abc ?? '') + (r.xyz ?? '') },
+                ]} />
+              </div>
               <div className="table-wrap" style={{ maxHeight: 420 }}>
                 <table>
                   <thead><tr><th>Item</th><th className="text">Store</th><th>Window forecast</th><th>Safety stock</th><th>Order-up-to</th><th>Service target</th><th>Expected fill</th><th className="text">Class</th></tr></thead>
@@ -119,4 +137,10 @@ export default function Allocation() {
       }}
     </Async>
   )
+}
+
+/** Supply as a share of the week's total net need (the pipeline sets it from Config.supply_ratio). */
+function supplyShare(rows: AllocationRow[]): string {
+  const need = sum(rows.map((r) => r.net_need ?? r.forecast))
+  return need > 0 ? pct(rows[0].supply / need, 0) : '–'
 }

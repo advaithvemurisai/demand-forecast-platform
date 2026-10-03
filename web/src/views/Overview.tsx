@@ -1,11 +1,13 @@
 import { getJson, getOptional } from '../data/load'
 import type {
-  AllocationBacktestRow, CoverageRow, Manifest, ModelRow, ReconRow, Summary, TwinExceptionRow, TwinFrontierRow, TwinPolicyCurveRow, TwinStressRow,
+  AllocationBacktestRow, CoverageRow, InventoryHealthRow, Manifest, ModelRow, ReconRow, Summary, TwinExceptionRow, TwinPolicyCurveRow, TwinResponseRow, TwinStressRow,
 } from '../data/types'
-import { Async, Kpi } from '../components/ui'
+import { Async, CsvButton, Kpi } from '../components/ui'
 import { useData } from '../components/data'
-import { MODEL_LABELS, num, pct, points, signedPct, usd } from '../lib/format'
-import { holdoutWmape, mean, sum, weeklyUplift } from '../lib/metrics'
+import { MODEL_LABELS, num, pct, points, signedPct, signedUsd, usd } from '../lib/format'
+import { bestResponse, holdoutWmape, mean, sum, weeklyUplift } from '../lib/metrics'
+
+const MATERIAL_USD = 50 // a watch-list row matters if this much is at risk in a week, or a stockout is more likely than not
 
 const REPO_URL = 'https://github.com/advaithvemurisai/demand-forecast-platform'
 const LAUNCH: { key: string; title: string }[] = [
@@ -17,17 +19,18 @@ const LAUNCH: { key: string; title: string }[] = [
 
 export default function Overview() {
   const state = useData(async () => {
-    const [manifest, summary, recon, models, coverage, backtest, curve, frontier, exceptions, stress] = await Promise.all([
+    const [manifest, summary, recon, models, coverage, backtest, curve, exceptions, stress, responses, health] = await Promise.all([
       getJson<Manifest>('manifest.json'), getJson<Summary>('summary.json'), getJson<ReconRow[]>('reconciliation_metrics.json'),
       getJson<ModelRow[]>('model_metrics.json'), getJson<CoverageRow[]>('interval_coverage.json'),
       getJson<AllocationBacktestRow[]>('allocation_backtest.json'), getOptional<TwinPolicyCurveRow[]>('twin_policy_curve.json'),
-      getOptional<TwinFrontierRow[]>('twin_frontier.json'), getOptional<TwinExceptionRow[]>('twin_exceptions.json'), getOptional<TwinStressRow[]>('twin_stress.json'),
+      getOptional<TwinExceptionRow[]>('twin_exceptions.json'), getOptional<TwinStressRow[]>('twin_stress.json'),
+      getOptional<TwinResponseRow[]>('twin_responses.json'), getOptional<InventoryHealthRow[]>('inventory_health.json'),
     ])
-    return { manifest, summary, recon, models, coverage, backtest, curve, frontier, exceptions, stress }
+    return { manifest, summary, recon, models, coverage, backtest, curve, exceptions, stress, responses, health }
   })
   return (
     <Async state={state}>
-      {({ manifest, summary, recon, models, coverage, backtest, curve, frontier, exceptions, stress }) => {
+      {({ manifest, summary, recon, models, coverage, backtest, curve, exceptions, stress, responses, health }) => {
         const served = summary.served_method
         const categories = manifest.products_by_category
         const products = sum(Object.values(categories))
@@ -50,20 +53,22 @@ export default function Overview() {
               <section>
                 <h2>What to do this week</h2>
                 <div className="actions">
-                  <ServiceAction frontier={frontier} summary={summary} />
-                  {exceptions && exceptions.length > 0 && <ExpediteAction rows={exceptions} />}
-                  {stress && <RiskAction rows={stress} />}
+                  <ServiceAction summary={summary} />
+                  {stress && <RiskAction rows={stress} responses={responses} />}
                   {allocationCi && (
                     <div className="card action">
                       <span className="kicker">If the warehouse runs short</span>
-                      <p><strong>Split scarce stock by expected margin, not pro-rata.</strong> Worth about {usd(allocationCi.mean * 52)} a year across four stores
+                      <p><strong>Split scarce stock by expected margin, not pro-rata.</strong> In a simulated shortage every week, worth about {usd(allocationCi.mean * 52)} a year across four stores
                         (95% CI {usd(allocationCi.lower * 52)} to {usd(allocationCi.upper * 52)}), {signedPct(lostChange)} lost revenue, no department starved.</p>
                       <p className="muted small"><a href="#/allocation">Next week’s split</a></p>
                     </div>
                   )}
                 </div>
+                {exceptions && exceptions.length > 0 && <WatchList rows={exceptions} health={health} />}
               </section>
             )}
+
+            {health && health.length > 0 && <Health rows={health} />}
 
             {stress && (
               <section>
@@ -88,7 +93,7 @@ export default function Overview() {
             <div className="grid kpis">
               <Kpi label="Allocation when supply is short" value={allocationCi ? `${usd(allocationCi.mean * 52)}/yr` : '–'}
                 delta={`${weeks.filter((w) => w.uplift > 0).length} of ${weeks.length} test weeks won`} tone="good"
-                note="More revenue than a proportional split, four stores, with supply at 90% of forecast" />
+                note="More revenue than a proportional split across four stores, in a simulated shortage: supply held at 90% of forecast every week" />
               {serviceSaving > 0 && <Kpi label="Right-sized service targets" value={`${usd(serviceSaving * 13)}/yr`} tone="good"
                 note="Lower lost margin + holding cost than today’s segment targets (4-week saving × 13), where the gain is clear of simulation noise" />}
               <Kpi label="Plans that agree" value={`${pct((bottomUpCat - servedCat) / bottomUpCat, 0)} lower`} delta={`category error ${pct(servedCat)} vs ${pct(bottomUpCat)}`} tone={servedCat <= bottomUpCat ? 'good' : 'bad'}
@@ -154,7 +159,8 @@ function Value({ curve, summary }: { curve: TwinPolicyCurveRow[]; summary: Summa
       </p>
       <div className="grid kpis">
         <Kpi label="Fill rate" value={pct(standard.fill_rate)} delta={`${points(standard.fill_rate - bare.fill_rate)} vs no safety stock`} tone="good" note="Share of demanded units sold, replayed on the holdout weeks, all four stores" />
-        <Kpi label="Lost sales, 4 weeks" value={usd(standard.lost_sales_value)} delta={`${usd(standard.lost_sales_value - bare.lost_sales_value)} vs no safety stock`} tone="good" note="Demand that found an empty shelf, at shelf price" />
+        <Kpi label="Lost sales, 4 weeks" value={usd(standard.lost_sales_value)} delta={`${usd(standard.lost_sales_value - bare.lost_sales_value)} vs no safety stock`} tone="good"
+          note={standard.sales_value ? `${pct(standard.lost_sales_value / (standard.sales_value + standard.lost_sales_value))} of demand (${pct(bare.lost_sales_value / ((bare.sales_value ?? 0) + bare.lost_sales_value))} without safety stock), at shelf price` : 'Demand that found an empty shelf, at shelf price'} />
         <Kpi label="Cost of the buffer" value={usd(extraHolding)} delta={`vs ${usd(marginBack)} margin recovered`} tone={marginBack > extraHolding ? 'good' : 'bad'}
           note={`Four weeks of holding cost on ${usd(standard.inventory_value - bare.inventory_value)} of extra stock (at cost; assumed rates by category)`} />
         <Kpi label="Forecast vs last week’s sales" value={Number.isFinite(stockGap) ? `${usd(stockGap)} less stock` : '–'}
@@ -169,53 +175,125 @@ function Value({ curve, summary }: { curve: TwinPolicyCurveRow[]; summary: Summa
   )
 }
 
-function ServiceAction({ frontier, summary }: { frontier?: TwinFrontierRow[]; summary: Summary }) {
-  const saving = summary.twin?.service_saving ?? {}
-  const recommended = (frontier ?? []).filter((row) => row.recommended)
-  const clear = recommended.filter((row) => saving[row.category]?.clear)
-  const edge = summary.twin?.service_at_grid_edge ?? []
+function ServiceAction({ summary }: { summary: Summary }) {
+  const twin = summary.twin
+  const by = twin?.service_by_assumption
+  const chosen = twin?.service_assumption ?? 'bias_corrected'
+  const recs = by?.[chosen] ?? {}
+  const clear = Object.entries(recs).filter(([, r]) => r.clear)
+  const unclear = Object.entries(recs).filter(([, r]) => !r.clear).map(([c]) => titleCase(c))
+  // Categories the uncorrected curve would push up: the advice an experienced reviewer would challenge.
+  const raw = by?.every_unit ?? {}
+  // ...but only where the corrected curve doesn't itself raise the target, so the two pieces of advice never conflict.
+  const raises = (c: string) => (recs[c]?.clear ?? false) && (recs[c]?.inventory_change ?? 0) > 0
+  const overstated = Object.entries(raw).filter(([c, r]) => r.clear && r.inventory_change > 0 && !raises(c))
+  const stock = sum(clear.map(([, r]) => r.inventory_change))
+  const label = (value: number) => `${(value * 100).toFixed(1).replace('.0', '')}%`
   return (
     <div className="card action">
       <span className="kicker">Service targets</span>
       {clear.length > 0 ? (
-        <p><strong>Move {clear.map((row) => `${titleCase(row.category)} to ${row.label}`).join(', ')}.</strong>{' '}
-          Saves {usd(sum(clear.map((row) => saving[row.category].saving)))} of lost margin + holding cost over four weeks
-          {clear.length === 1 ? ` (90% range ${usd(saving[clear[0].category].lower)} to ${usd(saving[clear[0].category].upper)})` : ''}.</p>
+        <p><strong>Move {clear.map(([c, r]) => `${titleCase(c)} to ${label(r.service)}`).join(', ')}.</strong>{' '}
+          Saves {usd(sum(clear.map(([, r]) => r.saving)))} of lost margin + holding over four weeks and {stock <= 0 ? `frees ${usd(-stock)}` : `ties up ${usd(stock)} more`} of stock.
+          {unclear.length > 0 && <> {unclear.join(', ')}: keep as is.</>}</p>
       ) : (
-        <p><strong>Keep today’s targets.</strong> No category’s cheapest target beats them by more than simulation noise.</p>
+        <p><strong>Keep today’s targets.</strong> Once stockouts are priced realistically, no category’s cheapest target beats them by more than simulation noise.</p>
       )}
-      {recommended.filter((row) => !saving[row.category]?.clear).length > 0 && clear.length > 0 && (
-        <p className="muted small">{recommended.filter((row) => !saving[row.category]?.clear).map((row) => titleCase(row.category)).join(', ')}: no clear gain, keep as is.</p>
+      {overstated.length > 0 && (
+        <p className="muted small">Don’t raise {overstated.map(([c, r]) => `${titleCase(c)} to ${label(r.service)} (+${usd(r.inventory_change)} stock)`).join(' or ')}: that only pays if every unmet unit is a lost sale,
+          and the simulator overstates lost sales {twin?.lost_sales_bias ? `${twin.lost_sales_bias.toFixed(1)}×` : ''}.</p>
       )}
-      {edge.length > 0 && <p className="muted small">{edge.map(titleCase).join(', ')} sits at the top of the tested range, so an even higher target may be cheaper still.</p>}
-      <p className="muted small"><a href="#/twin">Cost curves</a></p>
+      <p className="muted small"><a href="#/twin?section=policy">Cost curves under each assumption</a></p>
     </div>
   )
 }
 
-function ExpediteAction({ rows }: { rows: TwinExceptionRow[] }) {
-  const top = rows.slice(0, 5)
+function WatchList({ rows, health }: { rows: TwinExceptionRow[]; health?: InventoryHealthRow[] }) {
+  const material = rows.filter((r) => r.expected_lost_value >= MATERIAL_USD || r.stockout_probability >= 0.5)
+  const atRisk = sum(material.map((r) => r.expected_lost_value))
+  const network = health?.find((h) => h.group_type === 'category' && h.group === 'all')
+  const weekly = network ? network.sales_value / 4 : NaN
+  const depts = new Map<string, number>()
+  for (const r of material) depts.set(r.dept_id, (depts.get(r.dept_id) ?? 0) + r.expected_lost_value)
+  const top = [...depts.entries()].sort((a, b) => b[1] - a[1])[0]
   return (
-    <div className="card action">
-      <span className="kicker">Expedite</span>
-      <p><strong>{top.length} product-store pairs carry {usd(sum(top.map((r) => r.expected_lost_value)))} of sales at risk this week.</strong>{' '}
-        {top.slice(0, 3).map((r) => `${r.item_id} at ${r.store_id}`).join(', ')}…</p>
-      <p className="muted small"><a href="#/twin?section=exceptions">Full watch-list</a> ({rows.length} products, forecast-based reordering)</p>
-    </div>
+    <p className="muted small">
+      <strong>Watch-list:</strong> {material.length > 0
+        ? <>{material.length} product-store pairs have at least {usd(MATERIAL_USD)} at risk this week or are more likely than not to run out, {usd(atRisk)} in all
+          {Number.isFinite(weekly) ? <> ({pct(atRisk / weekly, 2)} of weekly sales)</> : null}{top ? <>, most in {top[0]}</> : null}. Too small to expedite item by item.</>
+        : <>nothing above {usd(MATERIAL_USD)} at risk this week.</>}{' '}
+      <a href="#/twin?section=exceptions">Full list and download</a>
+    </p>
   )
 }
 
-function RiskAction({ rows }: { rows: TwinStressRow[] }) {
+function RiskAction({ rows, responses }: { rows: TwinStressRow[]; responses?: TwinResponseRow[] }) {
   const lost = rows.filter((r) => r.policy === 'forecast_reorder' && r.metric === 'lost_sales_value' && (r.rationing ?? 'days_of_cover') === 'days_of_cover')
   const worst = [...lost].sort((a, b) => b.delta - a.delta)[0]
   if (!worst) return null
+  const clear = responses ? bestResponse(responses, worst.scenario) : undefined
+  // With no response clearly paying, still show the cheapest one, and say so.
+  const response = clear ?? responses?.filter((r) => r.scenario === worst.scenario && r.response !== 'none').sort((a, b) => b.net_benefit - a.net_benefit)[0]
+  const none = responses?.find((r) => r.scenario === worst.scenario && r.response === 'none')
+  const others = (responses ?? []).filter((r) => r.scenario === worst.scenario && r.response !== 'none' && r !== response && r.net_benefit_upper < 0)
   return (
     <div className="card action">
       <span className="kicker">Biggest risk</span>
       <p><strong>{worst.label}:</strong> about {usd(worst.delta)} more lost sales over four weeks
         {Number.isFinite(worst.delta_lower) ? ` (90% of futures ${usd(worst.delta_lower)} to ${usd(worst.delta_upper)})` : ''}.</p>
-      <p className="muted small"><a href={`#/twin?scenario=${worst.scenario}`}>Run it in the simulator</a></p>
+      {response && none && (
+        <p><strong>Best response:</strong> {response.label.toLowerCase()}. The extra loss falls to {usd(response.added_lost_sales)} at a cost of {usd(response.response_cost)}
+          {clear ? `, net ${signedUsd(response.net_benefit)} of margin.` : `, about break-even on margin (${signedUsd(response.net_benefit)}, within noise).${others.length ? ` ${others.map((r) => r.label.split(' ')[0]).join(' and ')} cost${others.length === 1 ? 's' : ''} more than ${others.length === 1 ? 'it saves' : 'they save'}.` : ''}`}</p>
+      )}
+      <p className="muted small"><a href="#/twin?section=responses">Every response compared</a> · <a href={`#/twin?scenario=${worst.scenario}`}>Run it in the simulator</a></p>
     </div>
+  )
+}
+
+/** The KPIs operations look at first: weeks of supply, turns, GMROI, losses as a share of sales, and the warehouse. */
+function Health({ rows }: { rows: InventoryHealthRow[] }) {
+  const categories = rows.filter((r) => r.group_type === 'category')
+  const total = categories.find((r) => r.group === 'all')
+  if (!total) return null
+  const ordered = [...categories.filter((r) => r.group !== 'all').sort((a, b) => a.group.localeCompare(b.group)), total]
+  const name = (r: InventoryHealthRow) => (r.group === 'all' ? 'All categories' : titleCase(r.group))
+  return (
+    <section>
+      <h2>Stock health</h2>
+      <div className="grid kpis">
+        <Kpi label="Weeks of supply" value={total.weeks_of_supply.toFixed(1)} tone="flat" note={`${total.store_weeks_of_supply.toFixed(1)} in stores + ${(total.weeks_of_supply - total.store_weeks_of_supply).toFixed(1)} in the warehouse, at cost`} />
+        <Kpi label="Inventory turns" value={`${total.turns.toFixed(1)}× a year`} tone="flat" note={`GMROI ${total.gmroi.toFixed(2)}: ${usd(total.gmroi)} of gross margin a year per $1 of stock (assumed margins)`} />
+        <Kpi label="Lost sales" value={`${pct(total.lost_share)} of demand`} tone="flat" note={`${usd(total.lost_sales_value)} over 4 weeks against ${usd(total.sales_value)} sold`} />
+        <Kpi label="Warehouse" value={`${pct(total.dc_fill_rate ?? NaN)} of store orders filled`} tone="flat"
+          note={`${usd(total.dc_inventory_value ?? NaN)} on hand, ${usd(total.dc_on_order_value ?? NaN)} on order from the supplier`} />
+      </div>
+      <div className="table-wrap stack">
+        <table className="stack health">
+          <thead><tr><th className="text">Category</th><th>Weeks of supply</th><th>Turns / yr</th><th>GMROI</th><th>Fill rate</th><th>Lost, % of demand</th><th>Store stock</th><th>Warehouse stock</th></tr></thead>
+          <tbody>
+            {ordered.map((r) => (
+              <tr key={r.group}>
+                <td className="text" data-label="Category">{r.group === 'all' ? <strong>{name(r)}</strong> : name(r)}</td>
+                <td className="num" data-label="Weeks of supply">{r.weeks_of_supply.toFixed(1)}</td><td className="num" data-label="Turns / yr">{r.turns.toFixed(1)}</td>
+                <td className="num" data-label="GMROI">{r.gmroi.toFixed(2)}</td><td className="num" data-label="Fill rate">{pct(r.fill_rate)}</td>
+                <td className="num" data-label="Lost, % of demand">{pct(r.lost_share)}</td><td className="num" data-label="Store stock">{usd(r.store_inventory_value)}</td>
+                <td className="num" data-label="Warehouse stock">{r.dc_inventory_value != null ? usd(r.dc_inventory_value) : '–'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="table-head">
+        <p className="muted small" style={{ margin: 0 }}>Replay of the four holdout weeks on what actually sold, forecast-based reordering, stores and warehouse together. Weeks of supply = stock at cost over weekly cost of goods sold; stock-to-sales is the same ratio. Margins are assumptions.</p>
+        <CsvButton filename="inventory_health.csv" rows={rows} columns={[
+          { header: 'group_type', value: (r) => r.group_type }, { header: 'group', value: (r) => r.group }, { header: 'weeks_of_supply', value: (r) => r.weeks_of_supply },
+          { header: 'store_weeks_of_supply', value: (r) => r.store_weeks_of_supply }, { header: 'turns_per_year', value: (r) => r.turns }, { header: 'gmroi', value: (r) => r.gmroi },
+          { header: 'fill_rate', value: (r) => r.fill_rate }, { header: 'in_stock_rate', value: (r) => r.in_stock_pct }, { header: 'lost_share_of_demand', value: (r) => r.lost_share },
+          { header: 'sales_4wk', value: (r) => r.sales_value }, { header: 'lost_sales_4wk', value: (r) => r.lost_sales_value },
+          { header: 'store_inventory_at_cost', value: (r) => r.store_inventory_value }, { header: 'warehouse_inventory_at_cost', value: (r) => r.dc_inventory_value },
+        ]} />
+      </div>
+    </section>
   )
 }
 

@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from 'recharts'
 import { getJson, getOptional } from '../data/load'
-import type { DecisionAccuracyRow, EventAccuracyRow, FvaRow, ModelRow, ReconRow, Summary, WeekdayBiasRow } from '../data/types'
+import type { DecisionAccuracyRow, EventAccuracyRow, FvaRow, InventoryHealthRow, ModelRow, ReconRow, SegmentCoverageRow, Summary, TwinFrontierRow, WeekdayBiasRow } from '../data/types'
 import { Async, ChartBox, Question, Segmented, Select } from '../components/ui'
 import { shade, useData } from '../components/data'
 import { axisProps, gridProps, SERIES, tooltipStyle } from '../lib/chart'
-import { LEVEL_LABELS, LEVELS, METHOD_LABELS, MODEL_LABELS, pct, points, relativeGap } from '../lib/format'
+import { LEVEL_LABELS, LEVELS, METHOD_LABELS, MODEL_LABELS, pct, points, relativeGap, signedUsd, usd } from '../lib/format'
 import { mean } from '../lib/metrics'
 
 type Metric = 'wmape' | 'wrmsse'
@@ -15,16 +15,18 @@ export default function Accuracy() {
   const [metric, setMetric] = useState<Metric>('wmape')
   const [modelLevel, setModelLevel] = useState('item')
   const state = useData(async () => {
-    const [recon, models, summary, decision, weekday, events, fva] = await Promise.all([
+    const [recon, models, summary, decision, weekday, events, fva, health, segments, speedFrontier] = await Promise.all([
       getJson<ReconRow[]>('reconciliation_metrics.json'), getJson<ModelRow[]>('model_metrics.json'), getJson<Summary>('summary.json'),
       getOptional<DecisionAccuracyRow[]>('decision_accuracy.json'), getOptional<WeekdayBiasRow[]>('weekday_bias.json'),
       getOptional<EventAccuracyRow[]>('event_accuracy.json'), getOptional<FvaRow[]>('override_fva.json'),
+      getOptional<InventoryHealthRow[]>('inventory_health.json'), getOptional<SegmentCoverageRow[]>('interval_coverage_segment.json'),
+      getOptional<TwinFrontierRow[]>('twin_frontier_speed.json'),
     ])
-    return { recon, models, summary, decision, weekday, events, fva }
+    return { recon, models, summary, decision, weekday, events, fva, health, segments, speedFrontier }
   })
   return (
     <Async state={state}>
-      {({ recon, models, summary, decision, weekday, events, fva }) => {
+      {({ recon, models, summary, decision, weekday, events, fva, health, segments, speedFrontier }) => {
         const served = summary.served_method
         const inWindow = <T extends { fold: string }>(rows: T[]) => rows.filter((row) => (window_ === 'holdout' ? row.fold === 'holdout' : row.fold.startsWith('backtest')))
         const cell = (level: string, method: string) => mean(inWindow(recon).filter((r) => r.level === level && r.method === method).map((r) => r[metric]))
@@ -104,6 +106,7 @@ export default function Accuracy() {
                   </table>
                 </div>
                 <p className="legend-note">Bias is forecast minus actual over actual: positive = over-forecast. Sporadic sellers are inherently noisy at any window.</p>
+                <LongTail rows={decisionHoldout} health={health} segments={segments} frontier={speedFrontier} assumption={summary.twin?.service_assumption} />
               </>
             )}
 
@@ -120,7 +123,7 @@ export default function Accuracy() {
                       <Bar dataKey="bias" name="Forecast − actual" fill={SERIES[0]} isAnimationActive={false} />
                     </BarChart>
                   </ChartBox>
-                  <p className="legend-note">Negative = under-forecast. Weekend peaks are where the item model has historically fallen short.</p>
+                  <p className="legend-note">{weekdayNote(weekday.filter((w) => w.fold === 'holdout'))}</p>
                 </div>
                 {events && events.length > 0 && (
                   <div>
@@ -168,5 +171,52 @@ export default function Accuracy() {
         )
       }}
     </Async>
+  )
+}
+
+/** Say what the weekday chart actually shows: the largest miss and its direction. */
+function weekdayNote(rows: WeekdayBiasRow[]): string {
+  if (!rows.length) return ''
+  const worst = [...rows].sort((a, b) => Math.abs(b.bias) - Math.abs(a.bias))[0]
+  const weekend = rows.filter((r) => r.weekday === 'Sat' || r.weekday === 'Sun')
+  const weekendMiss = Math.max(...weekend.map((r) => Math.abs(r.bias)))
+  return `Positive = over-forecast. The largest miss is ${worst.weekday}, ${worst.bias >= 0 ? 'over' : 'under'}-forecast by ${pct(Math.abs(worst.bias))}`
+    + (weekend.length ? `; weekends are within ${pct(weekendMiss)}.` : '.')
+}
+
+/** Slow and sporadic sellers are under-forecast: what that does to the shelf, and what the cost curve says to do. */
+function LongTail({ rows, health, segments, frontier, assumption = 'bias_corrected' }: {
+  rows: DecisionAccuracyRow[]; health?: InventoryHealthRow[]; segments?: SegmentCoverageRow[]; frontier?: TwinFrontierRow[]; assumption?: string
+}) {
+  const tail = rows.filter((r) => (r.velocity === 'slow' || r.velocity === 'sporadic') && r.bias < -0.05)
+  if (!tail.length) return null
+  const low = Math.min(...tail.map((r) => -r.bias)), high = Math.max(...tail.map((r) => -r.bias))
+  const speeds = (health ?? []).filter((h) => h.group_type === 'speed')
+  const tailRows = speeds.filter((h) => h.group === 'slow' || h.group === 'sporadic')
+  const share = (pick: (h: InventoryHealthRow) => number) => tailRows.reduce((a, h) => a + pick(h), 0) / Math.max(speeds.reduce((a, h) => a + pick(h), 0), 1e-9)
+  const fill = (name: string) => speeds.find((h) => h.group === name)?.fill_rate
+  const coverage = mean((segments ?? []).filter((r) => r.fold === 'holdout' && r.level === 'item' && r.nominal === 0.95 && /^(slow|sporadic)\|/.test(r.segment)).map((r) => r.coverage))
+  const curve = (frontier ?? []).filter((r) => r.assumption === assumption)
+  // The cost curve runs on simulated futures; where those miss the replayed fill rate badly, the curve can't price the segment.
+  const simulatedFill = (name: string) => curve.find((r) => r.category === name && r.service_level === null)?.fill_rate
+  const trusted = (name: string) => Math.abs((simulatedFill(name) ?? NaN) - (fill(name) ?? NaN)) <= 0.1
+  const best = curve.filter((r) => r.recommended && (r.category === 'slow' || r.category === 'sporadic'))
+  const clear = best.filter((r) => r.clear_saving && trusted(r.category))
+  const untrusted = best.filter((r) => !trusted(r.category))
+  return (
+    <div className="callout">
+      <strong>The long tail is under-forecast by {pct(low, 0)}–{pct(high, 0)}, and that is where most sales are lost.</strong>{' '}
+      {tailRows.length === 2 && (
+        <>Slow and sporadic sellers are {pct(share((h) => h.sales_value), 0)} of sales but {pct(share((h) => h.lost_sales_value), 0)} of lost sales in the holdout replay, with fill rates of {pct(fill('slow') ?? NaN)} and {pct(fill('sporadic') ?? NaN)} against {pct(fill('fast') ?? NaN)} for fast sellers. </>
+      )}
+      {Number.isFinite(coverage) && <>Their 95% ranges still cover {pct(coverage)} of sales, so the range is wide enough; the safety stock is set below it by their service target. </>}
+      {clear.length > 0 && <><strong>Action:</strong> {clear.map((r) => `set ${r.category} sellers to a ${r.label} service target (${signedUsd(r.inventory_change)} stock, saves ${usd(r.saving_vs_current)} over 4 weeks)`).join('; ')}. </>}
+      {best.filter((r) => !r.clear_saving && trusted(r.category)).map((r) => <span key={r.category}>For {r.category} sellers no target beats today’s by more than noise. </span>)}
+      {untrusted.map((r) => (
+        <span key={r.category}><strong>Not yet priceable:</strong> for {r.category} sellers the simulated futures fill {pct(simulatedFill(r.category) ?? NaN, 0)} of demand against {pct(fill(r.category) ?? NaN, 0)} replayed,
+          so the simulator understates their losses and its cost curve can’t set their target. Their under-forecast needs fixing at the source first (the bias-correction override below), then re-pricing. </span>
+      ))}
+      {' '}<span className="muted small">Cost curves by speed class, bias-corrected stockout cost.</span>
+    </div>
   )
 }

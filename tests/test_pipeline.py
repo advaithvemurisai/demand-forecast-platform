@@ -109,10 +109,16 @@ def test_pipeline_twin_phase_writes_validated_tables(synthetic_root):
     assert (validation["lower"] <= validation["upper"] + 1e-9).all()
     assert set(validation["fold"]) == {"backtest_2", "holdout"}  # backtest_1 has no earlier calibration
     frontier = pd.read_parquet(gold / "twin_frontier.parquet")
-    assert frontier.groupby("category")["recommended"].sum().eq(1).all()
+    assert set(frontier["assumption"]) == {"every_unit", "bias_corrected", "shopper_response"}
+    assert frontier.groupby(["assumption", "category"])["recommended"].sum().eq(1).all()
+    assert frontier.groupby(["assumption", "category"])["within_budget"].sum().le(1).all()
+    assert (frontier.loc[frontier["within_budget"], "inventory_change"] <= 1e-9).all()
     grid = frontier[frontier["service_level"].notna()].sort_values(["category", "service_level"])
-    for _, group in grid.groupby("category"):
+    for _, group in grid.groupby(["assumption", "category"]):
         assert group["inventory_value"].is_monotonic_increasing
+    # Pricing fewer stockouts as lost can only make the cheapest target lower or equal.
+    best = frontier[frontier["recommended"]].pivot(index="category", columns="assumption", values="service_level")
+    assert (best["shopper_response"] <= best["every_unit"] + 1e-9).all()
     stress = pd.read_parquet(gold / "twin_stress.parquet")
     lost = stress[(stress["metric"] == "lost_sales_value") & (stress["policy"] == "forecast_reorder") & (stress["rationing"] == "days_of_cover")]
     assert (lost["delta"] >= -1e-6).all()  # a shock never reduces lost sales
@@ -122,12 +128,21 @@ def test_pipeline_twin_phase_writes_validated_tables(synthetic_root):
     for _, group in curve.groupby("policy"):
         assert group.sort_values("safety_multiplier")["inventory_value"].is_monotonic_increasing
     assert {"saving_vs_current", "saving_lower", "saving_upper", "clear_saving", "at_grid_edge"} <= set(frontier.columns)
+    responses = pd.read_parquet(gold / "twin_responses.parquet")
+    assert set(responses["scenario"]) == {"event_spike", "late_shipment", "supplier_delay", "dc_cut"}
+    none = responses[responses["response"] == "none"]
+    assert (none["response_cost"].abs() < 1e-6).all() and (none["net_benefit"].abs() < 1e-6).all()
+    speed = pd.read_parquet(gold / "twin_frontier_speed.parquet")
+    assert set(speed["category"]) <= {"fast", "medium", "slow", "sporadic"} and speed.groupby(["assumption", "category"])["recommended"].sum().eq(1).all()
+    health = pd.read_parquet(gold / "inventory_health.parquet")
+    assert {"all", "FOODS"} <= set(health["group"]) and (health.loc[health["group_type"] == "category", "weeks_of_supply"] > 0).all()
+    assert health["lost_share"].between(0, 1).all()
     allocation = pd.read_parquet(gold / "allocation.parquet")
     assert (allocation["on_hand_source"] == "twin replay of the holdout window").all() and (allocation["on_hand"] >= 0).all()
     exceptions = pd.read_parquet(gold / "twin_exceptions.parquet")
     assert exceptions["expected_lost_value"].is_monotonic_decreasing
     assert not pd.read_parquet(gold / "twin_timeline.parquet").empty
-    assert {"fill_rate", "recommended_service", "share_realised_in_band", "typical_miss", "equal_inventory", "holdout_tradeoff", "service_saving"} <= set(summary["twin"])
+    assert {"fill_rate", "recommended_service", "share_realised_in_band", "typical_miss", "equal_inventory", "holdout_tradeoff", "service_saving", "service_by_assumption", "lost_sales_bias"} <= set(summary["twin"])
     assert 0 <= summary["twin"]["typical_miss"]["fill_rate"] <= 1
 
 

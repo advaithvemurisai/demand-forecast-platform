@@ -22,15 +22,17 @@ export default function Intervals() {
         }))
         const segmentTable = (() => {
           if (!segments) return []
-          const groups = new Map<string, number[]>()
+          // Segments themselves contain '|' (e.g. "fast|FOODS"), so group on the pair rather than a joined string.
+          const groups = new Map<string, { level: string; segment: string; coverage: number[]; n: number }>()
           for (const row of segments.filter((r) => r.nominal === 0.95)) {
-            const key = `${row.level}|${row.segment}`
-            groups.set(key, [...(groups.get(key) ?? []), row.coverage])
+            const key = JSON.stringify([row.level, row.segment])
+            const entry = groups.get(key) ?? { level: row.level, segment: row.segment, coverage: [], n: 0 }
+            entry.coverage.push(row.coverage)
+            entry.n += row.n
+            groups.set(key, entry)
           }
-          return [...groups.entries()].map(([key, values]) => {
-            const [level, segment] = key.split('|')
-            return { level, segment, coverage: mean(values), n: segments.filter((r) => r.level === level && r.segment === segment && r.nominal === 0.95).reduce((a, r) => a + r.n, 0) }
-          }).sort((a, b) => a.level.localeCompare(b.level) || a.segment.localeCompare(b.segment))
+          return [...groups.values()].map(({ level, segment, coverage, n }) => ({ level, segment, coverage: mean(coverage), n }))
+            .sort((a, b) => a.level.localeCompare(b.level) || a.segment.localeCompare(b.segment))
         })()
         return (
           <>

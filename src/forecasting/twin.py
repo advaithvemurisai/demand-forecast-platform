@@ -50,6 +50,13 @@ class Shock:
     supplier_delay_days: int = 0  # extra supplier lead time
     delay_days: tuple[int, int] | None = None  # days whose supplier orders are delayed (by order day); None = all
     replan_after: int | None = None  # days after the delay starts that the DC plans on the longer lead time; None = never
+    # Responses a planner can take, each with its own cost:
+    demand_planned: bool = False  # the spike is known in advance, so stores and the DC order for it
+    prebuild_days: int = 0  # extra days of forecast demand the DC holds from the start of the run (pre-build)
+    prebuild_until: int | None = None  # day the extra cover is dropped (the disruption is over); None = kept
+    expedite_share: float = 0.0  # share of the shortfall a late order leaves that goes by a faster route (planned lead time)
+    backup_share: float = 0.0  # share of a DC supply cut a second supplier makes up
+    premium: float = 0.0  # extra cost of expedited or second-supplier units, as a share of unit cost
 
 
 class Groups:
@@ -237,6 +244,11 @@ def simulate(
     rng = rng if rng is not None else np.random.default_rng(cfg.seed)
     reps, n, days = demand.shape
     demand = apply_shock(demand, shock).astype(np.float32)
+    if shock is not None and shock.demand_planned and shock.demand_scale != 1.0:  # a known event: the plan includes it
+        forecast = forecast.astype(np.float64).copy()
+        rows = np.ones(n, dtype=bool) if shock.demand_rows is None else np.asarray(shock.demand_rows, dtype=bool)
+        start, stop = shock.demand_days if shock.demand_days else (0, days)
+        forecast[rows, start:stop] *= shock.demand_scale
     lead = max(int(cfg.lead_time_days), 1)
     review = np.maximum(np.asarray(review_days, dtype=int), 1)
     cover = review + lead
@@ -253,6 +265,8 @@ def simulate(
     # DC: one stock per product, serving every store row of that product.
     product = Groups.of(products) if products is not None else Groups(np.arange(n))
     m = product.m
+    product_cost = product.sum(cost[None])[0] / product.sizes  # DC unit cost per product
+    product_holding = product.sum(holding[None])[0] / product.sizes  # and its weekly holding rate
     dc_forecast = product.sum(forecast.astype(np.float64)[None].transpose(0, 2, 1))[0].T  # (m, days)
     planned_lead = max(int(cfg.supplier_lead_days), 1)
     delay = int(shock.supplier_delay_days) if shock else 0
@@ -262,10 +276,17 @@ def simulate(
     dc_cover = planned_lead + dc_review
     dc_safety = dc_safety_stock(safety, cover, dc_forecast, product, dc_cover, cfg)
     dc_target = window_targets(dc_forecast, np.full(m, dc_cover)) + dc_safety[:, None]
+    prebuild = int(shock.prebuild_days) if shock else 0
+    if prebuild:  # hold extra days of cover from the start of the run, ahead of the disruption, then let it run down
+        extra = np.zeros((m, days))
+        extra[:, : shock.prebuild_until if shock.prebuild_until is not None else days] = span(dc_forecast, 0, prebuild)[:, None]
+        dc_target = dc_target + extra
     if replan_day is not None:  # once the planner knows, the DC covers the longer lead time
         long_cover = dc_cover + delay
         long_safety = dc_safety_stock(safety, cover, dc_forecast, product, long_cover, cfg)
         dc_target_long = window_targets(dc_forecast, np.full(m, long_cover)) + long_safety[:, None]
+        if prebuild:
+            dc_target_long = dc_target_long + extra
     spread = int(np.ceil(3 * cfg.supplier_lead_sd_days))
     pipe_len = planned_lead + delay + spread + 1
     dc_factor = np.ones(days, dtype=np.float32)
@@ -293,12 +314,27 @@ def simulate(
     in_stock = np.zeros((reps, n, days), dtype=bool)
     end_stock = np.zeros((reps, n, days), dtype=np.float32)
     flow = {"received": 0.0, "shipped": 0.0, "ordered": 0.0}
+    expedite = float(shock.expedite_share) if shock else 0.0
+    backup = float(shock.backup_share) if shock else 0.0
+    premium_rate = float(shock.premium) if shock else 0.0
+    premium = np.zeros(reps)  # cost of the response's expedited / second-supplier units
+    dc_value = np.zeros((reps, m))  # DC stock at cost, summed over the kept days
+    dc_on_order = np.zeros(reps)  # stock ordered from the supplier but not yet at the DC, at cost, summed over kept days
+    dc_asked = np.zeros(reps)  # store orders and what the DC shipped against them, over the kept days
+    dc_sent = np.zeros(reps)
+    dc_day = np.zeros((2, days))  # mean DC stock and stock on order at cost, per day
     for day in range(days):
         arrived = in_transit[:, :, 0].copy()
         on_hand += arrived
         in_transit[:, :, :-1] = in_transit[:, :, 1:].copy()
         in_transit[:, :, -1] = 0
-        dc_on_hand += dc_pipeline[:, :, 0] * dc_factor[day]
+        landing = dc_pipeline[:, :, 0]
+        factor = dc_factor[day]
+        if factor < 1.0 and backup > 0:  # a second supplier makes up part of the cut, at a premium
+            covered = landing * (1.0 - factor) * backup
+            premium += (covered * product_cost[None]).sum(axis=1) * premium_rate
+            factor = factor + (1.0 - factor) * backup
+        dc_on_hand += landing * factor
         flow["received"] += float(arrived.sum())
         dc_pipeline[:, :, :-1] = dc_pipeline[:, :, 1:].copy()
         dc_pipeline[:, :, -1] = 0
@@ -327,6 +363,9 @@ def simulate(
         dc_on_hand = dc_on_hand - product.sum(shipped)
         in_transit[:, :, lead - 1] += shipped.astype(np.float32)
         flow["shipped"] += float(shipped.sum())
+        if day >= cfg.warmup_days:
+            dc_asked += order.sum(axis=1)
+            dc_sent += shipped.sum(axis=1)
 
         if day % dc_review == 0:
             plan = dc_target_long if replan_day is not None and day >= replan_day else dc_target
@@ -335,8 +374,24 @@ def simulate(
             late = delay if delay_window[0] <= day < delay_window[1] else 0
             noise = np.rint(rng.normal(0, cfg.supplier_lead_sd_days, (reps, m))).astype(int) if cfg.supplier_lead_sd_days > 0 else np.zeros((reps, m), dtype=int)
             arrive = np.clip(planned_lead + late + np.clip(noise, -spread, spread), 1, pipe_len)
+            if late and expedite > 0:
+                # Expedite only what bridges the gap: the units the DC would be short of (against its safety stock)
+                # before an on-time order could land, out of this late order. The rest waits for the slow route.
+                cover = span(dc_forecast, day, day + planned_lead)[None, :] + dc_safety[None, :]
+                gap = cover - (np.maximum(dc_on_hand, 0) + dc_pipeline[:, :, :planned_lead].sum(axis=2))
+                fast = np.clip(gap, 0, quantity) * expedite
+                on_time = np.clip(planned_lead + np.clip(noise, -spread, spread), 1, pipe_len)
+                dc_pipeline[rep_index, product_index, on_time - 1] += fast
+                premium += (fast * product_cost[None]).sum(axis=1) * premium_rate
+                quantity = quantity - fast
             dc_pipeline[rep_index, product_index, arrive - 1] += quantity
         end_stock[:, :, day] = on_hand
+        stock_value = np.maximum(dc_on_hand, 0) * product_cost[None]
+        order_value = (dc_pipeline.sum(axis=2) * product_cost[None]).sum(axis=1)
+        dc_day[:, day] = stock_value.sum(axis=1).mean(), order_value.mean()
+        if day >= cfg.warmup_days:
+            dc_value += stock_value
+            dc_on_order += order_value
 
     demand_k, sold_k, lost_k, stock_k, in_stock_k = demand[:, :, keep], sold_day[:, :, keep], lost_day[:, :, keep], end_stock[:, :, keep], in_stock[:, :, keep]
     kept_days = demand_k.shape[2]
@@ -353,6 +408,7 @@ def simulate(
             "lost_sales_value": (lost.sum(axis=2) * price[rows][None]).sum(axis=1),
             "lost_margin": (lost.sum(axis=2) * margin[rows][None]).sum(axis=1),
             "sales_value": (s.sum(axis=2) * price[rows][None]).sum(axis=1),
+            "margin_value": (s.sum(axis=2) * margin[rows][None]).sum(axis=1),
             "inventory_value": inventory,
             "weeks_of_supply": mean_stock.sum(axis=1) / np.maximum(total_demand / kept_days * 7, 1e-9),
             "holding_cost": (mean_stock * (cost * holding)[rows][None]).sum(axis=1) * kept_days / 7,
@@ -360,7 +416,15 @@ def simulate(
             "units_sold": s.sum(axis=(1, 2)),
         }
 
-    result = {"kpis": kpis(slice(None)), "days": kept_days, "flow": flow}
+    network = kpis(slice(None))
+    network.update({
+        "dc_inventory_value": dc_value.sum(axis=1) / kept_days, "dc_on_order_value": dc_on_order / kept_days,
+        "dc_holding_cost": (dc_value * product_holding[None]).sum(axis=1) / 7,
+        "dc_fill_rate": dc_sent / np.maximum(dc_asked, 1e-9), "response_cost": premium,
+    })
+    result = {"kpis": network, "days": kept_days, "flow": flow, "dc_timeline": {"on_hand": dc_day[0, keep], "on_order": dc_day[1, keep]}}
+    if products is not None:  # mean DC stock at cost per product, labelled, for per-category roll-ups
+        result["dc_by_product"] = {"products": np.unique(np.asarray(products)), "value": (dc_value / kept_days).mean(axis=0)}
     if kpi_groups is not None:
         labels = np.asarray(kpi_groups)
         result["kpis_by"] = {str(label): kpis(np.flatnonzero(labels == label)) for label in np.unique(labels)}
@@ -398,7 +462,9 @@ def make_shock(spec: dict | None, categories: np.ndarray, warmup: int) -> Shock 
     """Build a Shock from a plain dict; day indices count from the start of the forecast window.
 
     Keys: demand_scale, category, days, dc_factor, dc_days, delay (extra supplier days), delay_days (which order days
-    are late; default: every order from the start of the window), replan_after (days until the DC plans for the delay).
+    are late; default: every order from the start of the window), replan_after (days until the DC plans for the delay),
+    and the responses: planned (the spike is in the forecast), prebuild_days, prebuild_until (window day the extra
+    cover is dropped), expedite_share (of the shortfall a late order leaves), backup_share, premium.
     """
     if not spec:
         return None
@@ -412,6 +478,10 @@ def make_shock(spec: dict | None, categories: np.ndarray, warmup: int) -> Shock 
         dc_supply_factor=float(spec.get("dc_factor", 1.0)), dc_days=shift(spec.get("dc_days")),
         supplier_delay_days=delay, delay_days=(shift(spec.get("delay_days")) or (warmup, 10**6)) if delay else None,
         replan_after=None if replan is None else int(replan),
+        demand_planned=bool(spec.get("planned", False)), prebuild_days=int(spec.get("prebuild_days", 0)),
+        prebuild_until=None if spec.get("prebuild_until") is None else int(spec["prebuild_until"]) + warmup,
+        expedite_share=float(spec.get("expedite_share", 0.0)), backup_share=float(spec.get("backup_share", 0.0)),
+        premium=float(spec.get("premium", 0.0)),
     )
 
 
@@ -429,7 +499,7 @@ def run_store(history, forecast, actual, scale, safety, review, price, config: T
     base = history[:, -28:].mean(axis=1, keepdims=True)
     extended = np.concatenate([np.repeat(base, warm, axis=1), forecast], axis=1)
     rng = np.random.default_rng(seed)
-    parts, by_parts, risk_parts, timelines = [], [], [], []
+    parts, by_parts, risk_parts, timelines, dc_parts = [], [], [], [], []
     sizes = [1] if replay else [min(chunk, reps - start) for start in range(0, reps, chunk)]
     for size in sizes:
         if replay:
@@ -449,6 +519,7 @@ def run_store(history, forecast, actual, scale, safety, review, price, config: T
             risk_parts.append((size, result["risk"]))
         if "timeline" in result:
             timelines.append((size, result["timeline"]))
+        dc_parts.append((size, result["dc_timeline"], result.get("dc_by_product")))
     stack = lambda dicts: {name: np.concatenate([part[name] for part in dicts]) for name in dicts[0]}
     out = {"kpis": stack(parts), "timeline": None, "n": int(len(forecast))}
     if by_parts:
@@ -459,6 +530,9 @@ def run_store(history, forecast, actual, scale, safety, review, price, config: T
     if timelines:  # average over every chunk, weighted by its replications
         first = timelines[0][1]
         out["timeline"] = {"group": first["group"], **{key: sum(size * t[key] for size, t in timelines) / total for key in ("on_hand", "demand", "lost")}}
+    out["dc_timeline"] = {key: sum(size * t[key] for size, t, _ in dc_parts) / total for key in ("on_hand", "on_order")}
+    if dc_parts[0][2] is not None:
+        out["dc_by_product"] = {"products": dc_parts[0][2]["products"], "value": sum(size * p["value"] for size, _, p in dc_parts) / total}
     return out
 
 
@@ -519,5 +593,6 @@ def simulate_bundle(bundle: dict, request: dict) -> dict:
                 "on_hand": np.round(timeline["on_hand"], 2).tolist(), "demand": np.round(timeline["demand"], 2).tolist(),
                 "lost": np.round(timeline["lost"], 2).tolist(),
             },
+            "dc": {key: np.round(values, 2).tolist() for key, values in result["dc_timeline"].items()},
         }
     return {"policy": policy, "service": service, "reps": reps, "stores": sorted(set(stores.tolist())) if multi else [], "baseline": pack(base), "scenario": pack(shocked) if shocked else None}

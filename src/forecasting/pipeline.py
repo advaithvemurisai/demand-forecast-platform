@@ -378,16 +378,29 @@ def twin_phase(cfg: Config, keys: pd.DataFrame, folds: dict, evaluated: list[str
     timeline = twin_runs.timeline_frame(holdout, tcfg, "forecast_reorder", seed=7)
     state_h, snap_h = folds[evaluated[last]], protect_snaps[last]
     safety_for = lambda level: item_safety_stock(cfg, keys, state_h, state_h["reconciled"][served_method][1], snap_h, service_override=level)["safety_stock"].to_numpy()
-    frontier = twin_runs.frontier_frame(holdout, tcfg, safety_for, holdout.safety, cfg.twin_reps, None, seed=300)
+    assumptions = twin_runs.lost_sale_assumptions(lost_sales_bias(validation))
+    frontier = twin_runs.frontier_frame(holdout, tcfg, safety_for, holdout.safety, cfg.twin_reps, None, seed=300, assumptions=assumptions)
+    velocity = np.array([label.split("|")[0] for label in state_h["segments"]["item"]])
+    frontier_speed = twin_runs.frontier_frame(holdout, tcfg, safety_for, holdout.safety, cfg.twin_reps, None, seed=300, assumptions=assumptions, groups=velocity)
     curve = twin_runs.policy_curve_frame(holdout, tcfg, seed=400)
     stress = twin_runs.stress_frame(holdout, tcfg, twin_runs.POLICY_LABELS, cfg.twin_reps, None, seed=500)
+    responses = twin_runs.response_frame(holdout, tcfg, cfg.twin_reps, None, seed=500, lost_scale=assumptions[twin_runs.DEFAULT_ASSUMPTION]["scale"])
+    health = twin_runs.health_frame(holdout, tcfg, seed=7, velocity=velocity)
     production = inputs(folds["production"], protect, None, len(evaluated))
     exceptions = twin_runs.exceptions_frame(production, tcfg, "forecast_reorder", cfg.twin_reps, None, seed=700)
     write_twin_inputs(cfg, keys, production, folds["production"], protect)
     return {
         "twin_validation": pd.DataFrame(validation), "twin_timeline": timeline, "twin_frontier": frontier, "twin_policy_curve": curve,
-        "twin_stress": stress, "twin_exceptions": exceptions,
+        "twin_stress": stress, "twin_exceptions": exceptions, "twin_responses": responses, "inventory_health": health,
+        "twin_frontier_speed": frontier_speed,
     }
+
+
+def lost_sales_bias(validation: list[dict]) -> float:
+    """Simulated / realised lost sales across the network validation windows (forecast policy): how far the twin overstates them."""
+    rows = [r for r in validation if r["store_id"] == "all" and r["policy"] == "forecast_reorder" and r["metric"] == "lost_sales_value"]
+    realised = sum(r["realised"] for r in rows)
+    return sum(r["predicted"] for r in rows) / realised if realised > 0 else float("nan")
 
 
 def write_twin_inputs(cfg: Config, keys: pd.DataFrame, production, state: dict, protect: dict) -> None:
@@ -430,8 +443,15 @@ def twin_summary(tables: dict[str, pd.DataFrame]) -> dict[str, object]:
         for metric in network["metric"].unique()
     }
     stores = validation[(validation["store_id"] != "all") & (validation["policy"] == "forecast_reorder")]
-    current = frontier[frontier["service_level"].isna()].set_index("category")
-    recommended = frontier[frontier["recommended"]].set_index("category")
+    default = frontier[frontier["assumption"] == twin_runs.DEFAULT_ASSUMPTION]
+    current = default[default["service_level"].isna()].set_index("category")
+    recommended = default[default["recommended"]].set_index("category")
+    by_assumption = {
+        name: {str(row["category"]): {"service": float(row["service_level"]), "saving": float(row["saving_vs_current"]), "clear": bool(row["clear_saving"]),
+                                      "inventory_change": float(row["inventory_change"])}
+               for _, row in part[part["recommended"]].iterrows()}
+        for name, part in frontier.groupby("assumption")
+    }
     curve = tables.get("twin_policy_curve")
     # The realised holdout trade-off: what the forecast policy buys over current practice, and what the extra stock costs.
     holdout = validation[(validation["fold"] == validation["fold"].iloc[-1]) & (validation["store_id"] == "all")]
@@ -453,6 +473,9 @@ def twin_summary(tables: dict[str, pd.DataFrame]) -> dict[str, object]:
             for category, row in recommended.iterrows()
         },
         "current_service_cost": {category: float(row["total_cost"]) for category, row in current.iterrows()},
+        "service_assumption": twin_runs.DEFAULT_ASSUMPTION,
+        "lost_sales_bias": float(frontier.loc[frontier["assumption"] == "bias_corrected", "lost_scale"].iloc[0] ** -1) if "bias_corrected" in set(frontier["assumption"]) else None,
+        "service_by_assumption": by_assumption,
         "stress_added_lost_sales": {name: float(value) for name, value in lost["delta"].items()},
         "stress_added_lost_sales_band": {name: [float(row["delta_lower"]), float(row["delta_upper"])] for name, row in lost.iterrows()},
         "holdout_tradeoff": trade,

@@ -252,14 +252,14 @@
     }
   ],
   "timings_seconds": {
-    "load_and_features": 14.0,
-    "models_backtest_1": 168.0,
-    "models_backtest_2": 171.2,
-    "models_backtest_3": 175.0,
-    "models_holdout": 175.7,
-    "models_production": 79.2,
-    "twin": 156.6,
-    "total": 943.2
+    "load_and_features": 14.8,
+    "models_backtest_1": 170.4,
+    "models_backtest_2": 165.3,
+    "models_backtest_3": 169.1,
+    "models_holdout": 172.7,
+    "models_production": 78.0,
+    "twin": 256.8,
+    "total": 1030.9
   },
   "served_method": "mint_oos",
   "twin": {
@@ -270,8 +270,8 @@
       "lower": 0.9620996713638306,
       "upper": 0.9726964235305786
     },
-    "share_realised_in_band": 0.20833333333333334,
-    "share_realised_in_band_stores": 0.2604166666666667,
+    "share_realised_in_band": 0.18518518518518517,
+    "share_realised_in_band_stores": 0.26851851851851855,
     "typical_miss": {
       "fill_rate": 0.010587751865386963,
       "in_stock_pct": 0.0030511174623998327,
@@ -280,39 +280,104 @@
       "inventory_value": 0.017837422096397885,
       "holding_cost": 0.017313883618099886,
       "units_lost": 0.5298806102905499,
-      "units_demanded": 0.07561483014629389
+      "units_demanded": 0.07561483014629389,
+      "sales_value": 0.05626804560299791
     },
     "fill_rate_gap": 0.0025063157081604004,
     "recommended_service": {
-      "FOODS": 0.98,
-      "HOBBIES": 0.99,
-      "HOUSEHOLD": 0.995
+      "FOODS": 0.95,
+      "HOBBIES": 0.98,
+      "HOUSEHOLD": 0.99
     },
     "service_at_grid_edge": [],
     "service_saving": {
       "FOODS": {
-        "saving": 215.81165650975424,
-        "lower": 66.58639040055759,
-        "upper": 363.24504346778934,
+        "saving": 574.8816231166934,
+        "lower": 227.84365074765014,
+        "upper": 924.4566368955504,
         "clear": true
       },
       "HOBBIES": {
-        "saving": 669.6598319804264,
-        "lower": 369.0591634999213,
-        "upper": 1036.8283634269044,
+        "saving": 250.9461827642548,
+        "lower": 179.99297848689122,
+        "upper": 344.01417387734983,
         "clear": true
       },
       "HOUSEHOLD": {
-        "saving": 1540.8753124144457,
-        "lower": 693.4354401199098,
-        "upper": 2225.626226991522,
-        "clear": true
+        "saving": 182.49427326811968,
+        "lower": -159.89533331697942,
+        "upper": 481.6944414193988,
+        "clear": false
       }
     },
     "current_service_cost": {
-      "FOODS": 16431.483974902265,
-      "HOBBIES": 3786.391990551022,
-      "HOUSEHOLD": 11695.928107275866
+      "FOODS": 13681.048695836413,
+      "HOBBIES": 2842.6133598692254,
+      "HOUSEHOLD": 8434.562002469289
+    },
+    "service_assumption": "bias_corrected",
+    "lost_sales_bias": 1.6492807231389954,
+    "service_by_assumption": {
+      "bias_corrected": {
+        "FOODS": {
+          "service": 0.95,
+          "saving": 574.8816231166934,
+          "clear": true,
+          "inventory_change": -23969.707395920792
+        },
+        "HOBBIES": {
+          "service": 0.98,
+          "saving": 250.9461827642548,
+          "clear": true,
+          "inventory_change": 12479.113724697003
+        },
+        "HOUSEHOLD": {
+          "service": 0.99,
+          "saving": 182.49427326811968,
+          "clear": false,
+          "inventory_change": 86081.97295442165
+        }
+      },
+      "every_unit": {
+        "FOODS": {
+          "service": 0.98,
+          "saving": 215.81165650975424,
+          "clear": true,
+          "inventory_change": 22105.012660189415
+        },
+        "HOBBIES": {
+          "service": 0.99,
+          "saving": 669.6598319804264,
+          "clear": true,
+          "inventory_change": 32914.59507003892
+        },
+        "HOUSEHOLD": {
+          "service": 0.995,
+          "saving": 1540.8753124144457,
+          "clear": true,
+          "inventory_change": 141231.87575816037
+        }
+      },
+      "shopper_response": {
+        "FOODS": {
+          "service": 0.85,
+          "saving": 2165.491672149949,
+          "clear": true,
+          "inventory_change": -69983.22076429558
+        },
+        "HOBBIES": {
+          "service": 0.95,
+          "saving": 130.39412962166284,
+          "clear": true,
+          "inventory_change": -8657.215976527143
+        },
+        "HOUSEHOLD": {
+          "service": 0.95,
+          "saving": 19.401947208484927,
+          "clear": false,
+          "inventory_change": -15736.340830751229
+        }
+      }
     },
     "stress_added_lost_sales": {
       "event_spike": 21177.608521269383,
@@ -345,6 +410,7 @@
       "inventory_value": -13873.905479467008,
       "lost_margin": 665.0751154367535,
       "lost_sales_value": 1666.2614759250864,
+      "sales_value": -1666.2616236316971,
       "units_demanded": 0.0,
       "units_lost": -71.708984375
     },

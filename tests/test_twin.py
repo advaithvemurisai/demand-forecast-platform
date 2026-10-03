@@ -391,3 +391,71 @@ def test_simulate_bundle_runs_every_store_together():
     assert set(result["baseline"]["kpis"]) == {"all", "CA_1", "CA_2"}
     assert result["baseline"]["timeline"]["group"][0].startswith("CA_1|")
     assert result["scenario"]["kpis"]["all"]["lost_sales_value"]["mean"] >= result["baseline"]["kpis"]["all"]["lost_sales_value"]["mean"]
+
+
+def test_each_response_cuts_the_loss_and_its_premium_is_charged():
+    rng = np.random.default_rng(12)
+    n, days = 40, 84
+    forecast = np.repeat(rng.uniform(1, 6, (n, 1)), days, axis=1)
+    demand = rng.poisson(forecast, (6, n, days)).astype(np.float32)
+    products = np.arange(n) % 20  # two stores per product, sharing the DC
+    cfg = twin.TwinConfig(presentation_min=0, warmup_days=14, supplier_lead_sd_days=0.0)
+    run = lambda spec: twin.simulate(demand, forecast, np.full(n, 3.0), np.full(n, 3), np.full(n, 2.0), cfg, products=products, unit_cost=np.full(n, 1.5),
+                                     shock=twin.make_shock(spec, np.full(n, "X"), 14))["kpis"]
+    delay = {"delay": 7, "replan_after": 7}
+    shocked = run(delay)
+    for response in ({"replan_after": 0}, {"prebuild_days": 7}, {"expedite_share": 0.5, "premium": 0.2}):
+        assert run({**delay, **response})["lost_sales_value"].mean() < shocked["lost_sales_value"].mean(), response
+    assert run({**delay, "expedite_share": 0.5, "premium": 0.2})["response_cost"].mean() > 0
+    assert (shocked["response_cost"] == 0).all()
+    prebuilt = run({**delay, "prebuild_days": 7})
+    assert prebuilt["dc_holding_cost"].mean() > shocked["dc_holding_cost"].mean()  # pre-building is paid for in holding
+    cut = {"dc_factor": 0.5, "dc_days": [0, 70]}
+    backed = run({**cut, "backup_share": 0.5, "premium": 0.1})
+    assert backed["lost_sales_value"].mean() < run(cut)["lost_sales_value"].mean() and backed["response_cost"].mean() > 0
+
+
+def test_a_planned_spike_loses_less_than_a_surprise():
+    rng = np.random.default_rng(13)
+    n, days = 30, 56
+    forecast = np.repeat(rng.uniform(2, 6, (n, 1)), days, axis=1)
+    demand = rng.poisson(forecast, (6, n, days)).astype(np.float32)
+    cfg = twin.TwinConfig(presentation_min=0, warmup_days=14)
+    spike = {"demand_scale": 1.6, "days": [7, 14]}
+    lost = lambda spec: _run(demand, forecast, 2.0, cfg=cfg, shock=twin.make_shock(spec, np.full(n, "X"), 14))["kpis"]["lost_sales_value"].mean()
+    assert lost({**spike, "planned": True}) < lost(spike)
+
+
+def test_dc_kpis_report_stock_orders_and_fill():
+    rng = np.random.default_rng(14)
+    n, days = 20, 56
+    forecast = np.full((n, days), 3.0)
+    demand = rng.poisson(3.0, (4, n, days)).astype(np.float32)
+    args = (demand, forecast, np.full(n, 2.0), np.full(n, 3), np.ones(n), twin.TwinConfig(warmup_days=14))
+    normal = twin.simulate(*args, products=np.arange(n) % 10)
+    starved = twin.simulate(*args, products=np.arange(n) % 10, shock=twin.Shock(dc_supply_factor=0.3, dc_days=(14, 56)))
+    k = normal["kpis"]
+    assert (k["dc_inventory_value"] > 0).all() and (k["dc_on_order_value"] > 0).all()
+    assert k["dc_fill_rate"].mean() > starved["kpis"]["dc_fill_rate"].mean()
+    assert 0 < starved["kpis"]["dc_fill_rate"].mean() <= 1
+    assert len(normal["dc_timeline"]["on_hand"]) == days - 14
+    assert normal["dc_by_product"]["value"].sum() == pytest.approx(k["dc_inventory_value"].mean(), rel=1e-6)
+
+
+def test_prebuild_runs_down_after_its_stop_day_and_expedite_only_bridges_the_gap():
+    rng = np.random.default_rng(15)
+    n, days = 40, 84
+    forecast = np.repeat(rng.uniform(1, 6, (n, 1)), days, axis=1)
+    demand = rng.poisson(forecast, (6, n, days)).astype(np.float32)
+    cfg = twin.TwinConfig(presentation_min=0, warmup_days=14, supplier_lead_sd_days=0.0)
+    run = lambda spec: twin.simulate(demand, forecast, np.full(n, 3.0), np.full(n, 3), np.full(n, 2.0), cfg, products=np.arange(n) % 20, unit_cost=np.full(n, 1.5),
+                                     shock=twin.make_shock(spec, np.full(n, "X"), 14))["kpis"]
+    late = {"delay": 7, "delay_days": [0, 7]}
+    kept = run({**late, "prebuild_days": 7})
+    dropped = run({**late, "prebuild_days": 7, "prebuild_until": 14})
+    assert dropped["dc_holding_cost"].mean() < kept["dc_holding_cost"].mean()
+    # Expediting the whole gap costs far less than the premium on every late unit, yet still cuts the loss.
+    bridged = run({**late, "expedite_share": 1.0, "premium": 0.2})
+    assert bridged["lost_sales_value"].mean() < run(late)["lost_sales_value"].mean()
+    every_unit = twin.simulate(demand, forecast, np.full(n, 3.0), np.full(n, 3), np.full(n, 2.0), cfg, products=np.arange(n) % 20, unit_cost=np.full(n, 1.5))["flow"]["ordered"]
+    assert bridged["response_cost"].mean() < 0.2 * 1.5 * every_unit / 6

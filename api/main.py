@@ -25,7 +25,7 @@ GOLD_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data" / "gold"))
 TWIN_DIR = Path(os.environ.get("TWIN_DIR", ROOT / "data" / "dashboard" / "twin_inputs"))
 METRIC_TABLES = {"model_metrics", "reconciliation_metrics", "interval_coverage", "allocation_backtest", "drift"}
 TWIN_TABLES = {
-    "twin_validation", "twin_timeline", "twin_frontier", "twin_policy_curve", "twin_stress", "twin_exceptions", "override_fva", "decision_accuracy",
+    "twin_validation", "twin_timeline", "twin_frontier", "twin_policy_curve", "twin_stress", "twin_exceptions", "twin_responses", "inventory_health", "twin_frontier_speed", "override_fva", "decision_accuracy",
     "weekday_bias", "event_accuracy", "bias_exceptions", "probable_stockouts", "interval_coverage_segment", "allocation_node_fill", "planning_cycle",
 }
 RATE_LIMIT, RATE_WINDOW = int(os.environ.get("TWIN_RATE_LIMIT", 30)), 60.0
@@ -54,6 +54,11 @@ class Scenario(BaseModel):
     delay: int = Field(0, ge=0, le=14)
     delay_days: tuple[int, int] | None = None  # which order days are late (default: all from day 0)
     replan_after: int | None = Field(None, ge=0, le=28)  # days until the DC plans for the longer lead time
+    planned: bool = False  # response: the spike is in the forecast
+    prebuild_days: int = Field(0, ge=0, le=21)  # response: extra days of DC cover held ahead of the disruption
+    expedite_share: float = Field(0.0, ge=0.0, le=1.0)  # response: share of late orders sent by a faster route
+    backup_share: float = Field(0.0, ge=0.0, le=1.0)  # response: share of a DC cut a second supplier makes up
+    premium: float = Field(0.0, ge=0.0, le=1.0)  # cost of expedited / second-supplier units, share of unit cost
 
 
 class TwinRequest(BaseModel):

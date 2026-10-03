@@ -16,7 +16,7 @@ def export_gold(outputs: dict[str, pd.DataFrame], output_dir: str | Path) -> Non
 # Written by newer pipeline stages; copied when present so the web app can show them.
 OPTIONAL_TABLES = (
     "interval_coverage_segment", "allocation_node_fill", "decision_accuracy", "weekday_bias", "event_accuracy", "bias_exceptions",
-    "override_fva", "probable_stockouts", "twin_validation", "twin_timeline", "twin_frontier", "twin_policy_curve", "twin_stress", "twin_exceptions", "planning_cycle",
+    "override_fva", "probable_stockouts", "twin_validation", "twin_timeline", "twin_frontier", "twin_policy_curve", "twin_stress", "twin_exceptions", "twin_responses", "inventory_health", "twin_frontier_speed", "planning_cycle",
 )
 DASHBOARD_TABLES = (
     "model_metrics", "reconciliation_metrics", "interval_coverage", "allocation",

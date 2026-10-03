@@ -1,5 +1,5 @@
 import type {
-  AllocationBacktestRow, CoverageRow, ReconRow, Summary, TwinFrontierRow, TwinStressRow, TwinValidationRow,
+  AllocationBacktestRow, CoverageRow, ReconRow, Summary, TwinFrontierRow, TwinResponseRow, TwinStressRow, TwinValidationRow,
 } from '../data/types'
 
 export const sum = (values: number[]): number => values.reduce((total, value) => total + value, 0)
@@ -50,8 +50,13 @@ export function twinHeadline(rows: TwinValidationRow[], policy = 'forecast_reord
   return { fold: latest, metrics: byMetric, inBand: network.filter((row) => row.in_band).length, checks: network.length }
 }
 
-export function recommendedService(rows: TwinFrontierRow[]): Record<string, TwinFrontierRow> {
-  return Object.fromEntries(rows.filter((row) => row.recommended).map((row) => [row.category, row]))
+export function recommendedService(rows: TwinFrontierRow[], assumption?: string): Record<string, TwinFrontierRow> {
+  return Object.fromEntries(rows.filter((row) => row.recommended && (!assumption || row.assumption === assumption)).map((row) => [row.category, row]))
+}
+
+/** The best response to a scenario: the largest net benefit whose 90% range clears zero, else none. */
+export function bestResponse(rows: TwinResponseRow[], scenario: string): TwinResponseRow | undefined {
+  return rows.filter((r) => r.scenario === scenario && r.response !== 'none' && r.net_benefit_lower > 0).sort((a, b) => b.net_benefit - a.net_benefit)[0]
 }
 
 /** Change in a stress metric versus baseline for one policy (positive lost sales = worse). */

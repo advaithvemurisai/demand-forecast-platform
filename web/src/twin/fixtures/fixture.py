@@ -14,6 +14,9 @@ REQUESTS = {
     "bootstrap_delay": {"reps": 12, "seed": 5, "bootstrap": True, "scenario": {"delay": 7, "replan_after": 7}},
     "late_shipment": {"reps": 12, "seed": 5, "service": 0.995, "scenario": {"delay": 7, "delay_days": [0, 7]}},
     "bootstrap_value_rationing": {"reps": 12, "seed": 5, "bootstrap": True, "rationing": "value", "scenario": {"dc_factor": 0.6, "dc_days": [0, 28]}},
+    # Planner responses: expedite part of a lasting delay; a second supplier behind a DC cut.
+    "bootstrap_expedite": {"reps": 12, "seed": 5, "bootstrap": True, "scenario": {"delay": 7, "replan_after": 7, "expedite_share": 0.5, "premium": 0.2, "prebuild_days": 7}},
+    "backup_supplier": {"reps": 12, "seed": 5, "scenario": {"dc_factor": 0.6, "dc_days": [7, 21], "backup_share": 0.5, "premium": 0.1}},
 }
 
 
