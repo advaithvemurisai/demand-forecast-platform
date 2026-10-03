@@ -1,103 +1,133 @@
-# Hierarchical Demand Forecasting, Allocation and Inventory Twin
+# Demand Planning Platform: Forecast, Allocate, Stress-Test
 
-**[▶ Live app](https://demand-forecast-platform.vercel.app/)**: forecasts, allocation and an inventory simulator that runs in your browser
+[![CI](https://github.com/advaithvemurisai/demand-forecast-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/advaithvemurisai/demand-forecast-platform/actions/workflows/ci.yml)
+
+**[▶ Open the live app](https://demand-forecast-platform.vercel.app/)**. No login, no backend: the inventory simulator runs in your browser.
+
+An end-to-end retail planning system built on real Walmart sales (the M5 dataset): **3,049 products × 4 California stores**, forecast 28 days ahead, reconciled so every level of the plan adds up, allocated when the warehouse runs short, and stress-tested in a day-by-day inventory simulator of one warehouse and four stores.
+
+![The overview page: where the value is, and what to do this week](docs/overview.png)
+
+## Results at a glance
+
+All figures are from a holdout window that was never used for any modelling choice, across all four stores.
+
+| Question | Answer |
+|---|---|
+| How accurate are the product forecasts? | 14% lower error than repeating last week's sales |
+| Do the plans agree across levels? | Yes, exactly; category forecasts are also 15% more accurate than adding up product forecasts |
+| Can the forecast ranges be trusted? | 95% ranges contain 94.1% of actual product sales, out of sample |
+| What does the safety stock buy? | Fill rate **87.3% → 97.0%**; **$188k less lost sales** over four weeks for $9.9k of holding cost |
+| When the warehouse is short, does smarter allocation pay? | About **$91k a year** more revenue than a proportional split; won 11 of 12 test weeks |
+| Are today's service targets right? | Not quite: Foods 98%, Hobbies 99%, Household 99.5% saves about $31k a year |
+| What is the biggest operational risk? | Supplier lead time: doubling it costs about $44k of sales over four weeks, even when the planner adjusts after a week |
+
+## The finding I didn't expect
+
+The first version compared forecast-based reordering with "last week's sales" and reported a **+12.8 point** fill-rate gain. A review pointed out that the baseline carried no safety stock. Once both policies get the same buffer:
+
+- Forecast-based reordering fills **97.0% vs 96.8%** at the same $402k of stock.
+- To match it, reordering from last week's sales needs about **3% more stock**.
+
+Over a 3–8 day replenishment window, last week's sales rate is already a fair estimate for most products. **The value comes from calibrated safety stock, not from forecast-based reordering**, and the app and this README now say so. The simulator also plots fill rate against inventory for both policies, so they are compared at equal stock instead of at one hand-picked setting.
 
 ## The business problem
 
-A retailer has to decide how much of each product to stock and which stores get it. Three things make that hard:
+A retailer must decide how much of each product to stock and which stores get it.
 
-- **Plans at different levels disagree.** Buyers plan categories, store managers plan their store, and the supply chain plans the region. Forecast each level separately and the numbers don't add up, so teams order against conflicting plans.
-- **Supply is often short.** When the warehouse can't cover every store, someone has to decide who goes without. A proportional split ignores which units are most likely to sell and what they're worth.
-- **Nobody can test a policy before living with it.** What does a demand spike, a late supplier or a different service target do to stock, sales and cash? The answer is usually found out on the shelf.
+1. **Plans at different levels disagree.** Buyers plan categories, store managers plan stores, supply chain plans the region. Forecast each separately and the numbers don't add up.
+2. **Supply is often short.** When the warehouse can't cover every store, a proportional split ignores which units are likely to sell and what they're worth.
+3. **Policies are tested on the shelf.** What a demand spike, a late supplier or a new service target does to stock and cash is usually found out the hard way.
 
-Too little stock loses sales; too much ties up cash. This project builds the pipeline a planning team would use for all three, on real Walmart sales data (the M5 competition dataset, California stores).
-
-## What's being forecast
-
-**Daily unit sales of 3,049 Walmart products in each of 4 California stores, 28 days ahead.** The products span three categories:
-
-| Category | Products | Departments |
-|---|---|---|
-| Foods | 1,437 | 3 |
-| Household | 1,047 | 2 |
-| Hobbies | 565 | 2 |
-
-That is 12,196 product-store combinations, rolled up into departments, categories, stores and the state total. Walmart anonymised the product names, so items appear as codes such as `FOODS_3_090`.
-
-## What each step solves
-
-Holdout = a final 28-day window never used for any modelling choice. Numbers are from the committed run (`data/dashboard/`).
-
-| Step | Business question | Result |
-|---|---|---|
-| **Forecast** | How much will each product sell in each store, day by day, over four weeks? | 14% lower product-level error than repeating last week's sales |
-| **Reconcile** | Do the item, store and regional plans agree? | Forecasts add up at every level; category error 15% lower than adding up item forecasts (WRMSSE 0.448) |
-| **Quantify uncertainty** | How sure are we, and how bad could it get? | 95% ranges contain 94.1% of item sales; aggregate levels run narrower (92.4–94.0%) |
-| **Safety stock** | How much buffer does each product need over its replenishment window? | A stock target per product: lead time + days between orders, service targets by value × variability class, shelf minimum, case packs |
-| **Allocate** | When the warehouse is short, which departments in which stores get the stock? | About $91k a year more revenue and 9.5% less lost revenue than a proportional split of net need, no department starved |
-| **Simulate** | What happens to stock, service and cash under a policy, a demand spike or a supply problem? | Day-by-day twin of one warehouse and four stores: the calibrated safety stock lifts fill rate from 87% to 97%; service targets re-tuned per category (below) |
-| **Monitor** | Has demand shifted enough to retrain? | PSI and accuracy-decay checks, plus a twin-divergence check |
-
-### Reconciliation in plain terms
-
-The platform uses **MinT reconciliation**. It takes forecasts from every level and finds the closest set of numbers that add up exactly. Forecasts with a good track record barely move; unreliable ones absorb most of the correction. The result is one consistent plan every team can work from, more accurate than building up from items.
-
-## The inventory digital twin
-
-A stateful, vectorised simulation of **supplier → one California distribution centre → 4 stores × 3,049 products**, one day at a time: receive in-transit stock, sell (lost sales when the shelf is empty), order up to a policy target on review days, and ration the DC's stock when it is short. All four stores run in one simulation: the DC holds stock **per product** and shares each product between the stores that ordered it, and every simulated future draws one demand week shared by every product and store, so common shocks hit the whole network at once. The DC reorders each product weekly against its network forecast, with a pooled safety stock (square-root law across stores) that also covers a variable supplier lead time; every supplier order draws its own lead time. Inventory and holding cost are valued at cost, not shelf price. It follows supply-chain digital-twin practice: one narrow use case with KPIs defined first, validation against history, replications with confidence bands, and a maturity path from descriptive to prescriptive.
-
-| Level | What it does | Where |
-|---|---|---|
-| **Descriptive** | Replays a window on actual sales: on-hand, demand and lost sales per store × department | `twin_timeline` |
-| **Diagnostic** | Flags probable stockouts (steady sellers only) and tracks how far the twin drifts from reality | `probable_stockouts`, `twin_validation` |
-| **Predictive** | Simulates 50 futures from forecast and calibration data alone, then compares with what happened | `twin_validation` |
-| **Prescriptive** | Cost-optimal service level per category, a fair policy comparison at equal inventory, four stress tests, three DC rationing rules, and a stockout watch-list | `twin_frontier`, `twin_policy_curve`, `twin_stress`, `twin_exceptions` |
-
-**What the twin says on the California data**
-
-- **The safety stock is where the value is.** Replaying the holdout weeks on what actually sold, the calibrated safety stock lifts fill rate from 87.3% to 97.0% and cuts lost sales by $188k over four weeks across the four stores, for $9.9k of extra holding cost against $55k of margin recovered.
-- **Reordering from the forecast instead of last week's sales adds little on top.** With both policies carrying the same safety stock, the forecast fills 97.0% vs 96.8% at the same $402k of stock; to match it, last-week reordering needs about $415k (3% more). Over a 3–8 day replenishment window, last week's sales rate is already a fair estimate for most products. (An earlier version of this project compared against a last-week policy with *no* safety stock and reported +12.8 pts of fill rate; that gap was the buffer, not the forecast.)
-- **Cheapest service targets:** Foods 98%, Hobbies 99%, Household 99.5% (99.8% costs more). Against today's value × variability targets this saves about $2.4k of lost margin + holding cost per four weeks (≈ $31k a year), and each category's saving clears zero across 90% of simulated futures.
-- **Supplier lead time is the dominant risk.** If lead time doubles from 7 to 14 days and the planner adjusts after a week, lost sales rise by about $44k over four weeks (90% of futures: $30k–$59k) and fill rate falls 2.6 pts. One delivery arriving a week late costs about $15k, a holiday-style +50% Foods week $21k, and 30% less stock reaching the warehouse for two weeks $8k.
-- **How the DC shares a short product barely matters**: days-of-cover, proportional and by-value rationing all lose about $8.2k in the warehouse-shortfall test, because each product's shortfall is split between just four stores with similar cover.
-- **Service levels are predicted well; ranges are still too narrow.** Across three windows the predicted network fill rate is off by 1.1 pts on average and in-stock by 0.3 pts (holdout: 96.8% predicted vs 97.0% realised). The realised value fell inside the 90% range in 5 of 24 network checks and 25 of 96 store checks (up from 1 of 18 when stores were simulated separately), because the demand bootstrap only has 4–16 past weeks to draw from.
-- **Dollar losses are overstated about 1.7×.** Predicted demand runs ~8% above observed sales, and observed sales are themselves held down by real stockouts. Lost sales is a tail quantity, so read dollar figures as policy-vs-policy comparisons, not absolute forecasts.
-
-The simulator is one numpy-only file, [`src/forecasting/twin.py`](src/forecasting/twin.py). The pipeline, the API and the browser all run that same file (the browser through Pyodide), and a parity test checks CPython and WebAssembly agree to 1e-6.
-
-## How it's built
+## What's in it
 
 ```mermaid
 flowchart LR
-    D[Sales data] --> F[Features]
-    F --> M[Forecast models]
-    M --> R[Reconciliation]
-    R --> P[Forecast ranges]
-    P --> S[Product safety stock]
-    P --> A[Department allocation]
+    D[Walmart M5 sales] --> F[Features and<br/>stockout masking]
+    F --> M[LightGBM + SARIMA]
+    M --> R[MinT reconciliation]
+    R --> P[Conformal ranges]
+    P --> S[Safety stock per product]
+    P --> A[Allocation LP]
     S --> T[Inventory twin]
-    A --> O[Web app, API, BI exports]
-    T --> O
+    A --> T
+    T --> O[Web app · API · BI exports]
 ```
 
-- **Models:** one LightGBM model forecasts every product in every store, trained without days a steady seller was probably out of stock (6% of training rows). Department, category, store and state forecasts are the product forecasts added up, then reconciled with classical SARIMA forecasts made directly at those levels. Closed days (Christmas) are forecast at zero, and events carry distance-to-event features.
-- **Evaluation:** three rolling-origin backtests, then a held-out final window never used for any modelling choice.
-- **Intervals:** split-conformal, calibrated separately per segment (Mondrian: items by speed class and category, departments by category), out-of-sample.
-- **Allocation:** each week one warehouse can ship 90% of forecast demand to the 4 stores, a simulated shortage. Stores carry stock from week to week, and both rules allocate against **net need** (forecast plus safety stock, minus what the store already holds). An optimisation model splits supply across 28 department × store targets, maximising expected *margin* (assumed by category) over demand scenarios, with every target's stock held to at least half its forecast so none is starved; the benchmark splits supply in proportion to net need. Over 12 test weeks the optimiser earned more in 11, a mean +$1.8k per week (95% CI $0.2k to $3.4k, about $91k a year), and left 9.5% less revenue unfilled while losing 4.4% more units: it favours margin over unit count. Next week's split starts from the twin's on-hand stock at the end of the replayed holdout. The split is by department; inside the twin the DC then rations each product between stores.
-- **Decision-grain accuracy:** forecasts are also scored over each product's replenishment window, with bias by weekday, event days, and a tracking-signal exceptions list of products the forecast keeps missing in one direction.
-- **Delivery:** a static React app ([`web/`](web/)), a FastAPI service ([`api/`](api/)), Tableau / Looker Studio exports, and MLflow run tracking.
+| Step | What it does | Method |
+|---|---|---|
+| **Forecast** | Daily sales for 12,196 product-store pairs | One global LightGBM model. Days a steady seller was probably out of stock are left out of training (Poisson zero-run test); closed days are forecast at zero, and events get distance-to-event features |
+| **Reconcile** | One plan that adds up from product to state | MinT with out-of-sample weights, solved via the Woodbury identity so it scales to 12k series |
+| **Quantify uncertainty** | A range around every forecast | Split-conformal intervals calibrated per segment (product speed × category) |
+| **Safety stock** | A stock target per product | Conformal quantiles over each product's replenishment window; service targets by value × variability (ABC × XYZ) |
+| **Allocate** | Who gets stock when supply is short | Scenario LP maximising expected margin against **net need** (what stores already hold counts), with a minimum fill so no department is starved |
+| **Simulate** | What a policy or a disruption does to stock, service and cash | The inventory twin (below) |
+| **Monitor** | When to retrain | PSI drift, accuracy decay, and a check that the twin still matches reality |
+
+## The inventory twin
+
+A day-by-day simulation of **supplier → one distribution centre → 4 stores × 3,049 products**: receive stock, sell (lost sales when the shelf is empty), reorder up to target, and ration the warehouse's stock when it is short.
+
+![The stress-test page: a supplier slowdown across all four stores](docs/stress-test.png)
+
+What makes it more than a toy:
+
+- **One shared warehouse.** All four stores run in one simulation. The warehouse holds stock per product and rations each product between the stores that ordered it.
+- **Realistic warehouse policy.** Its safety stock pools the stores' demand risk (square-root law) and covers a supplier lead time that varies from order to order.
+- **Correlated demand.** Each simulated future replays a past week of real sales shared by every product and store, so a bad week hits the whole network at once.
+- **Costs at cost.** Inventory and holding cost use unit cost, not shelf price, with higher holding rates for perishable food.
+- **Validated against history.** For each past window it predicts service levels from forecast data alone, then replays what actually sold.
+- **One engine everywhere.** The pipeline, the API and the browser run the same numpy-only file, [`twin.py`](src/forecasting/twin.py). The browser runs it through Pyodide, and a test checks the two agree to 1e-6.
+
+**What it found**
+
+| Scenario (holdout, four weeks) | Extra lost sales | 90% of simulated futures |
+|---|---|---|
+| Supplier lead time 7 → 14 days, planner adjusts after a week | $44k | $30k – $59k |
+| Holiday-style +50% Foods demand for a week | $21k | $16k – $28k |
+| One supplier delivery a week late | $15k | $10k – $23k |
+| Warehouse receives 30% less for two weeks | $8k | $4k – $13k |
+
+How the warehouse shares a short product barely matters: by days of cover, proportionally or by value, each rule loses about $8.2k. Each product's shortfall is split between just four stores with similar cover.
+
+**How far to trust it.** The predicted network fill rate is within 1.1 points of reality on average (holdout: 96.8% predicted vs 97.0% realised). Its 90% ranges are still too narrow, though: the realised value fell inside them in 5 of 24 network checks. Predicted dollar losses run about 1.7× high, because predicted demand is ~8% above observed sales, which stockouts themselves hold down. Read dollar figures as comparisons between policies, not as forecasts.
 
 ## Honest limitations
 
-- **M5 has no inventory, lead-time, cost or case-pack data.** The twin's starting stock, lead times and their spread, margins (by category, which set unit costs) and holding costs (including food spoilage) are assumptions set in `pipeline.Config` and `TwinConfig`, not measurements. The DC → store leg has a fixed one-day lead time.
-- **M5 records sales, not demand.** A zero can mean no demand or no stock. Only steady sellers (≥1 unit/day) are judged by a Poisson zero-run test (≈4% of days flagged); a looser rule flagged 19% and biased the model upward. Some censoring remains, so item-level WMAPE (0.743, vs 0.727 before masking) is measured against sales that are themselves censored.
-- **Twin ranges are too narrow** (see above): demand scenarios replay whole past weeks shared by every product and store, so common shocks are kept, but only as far as the few available weeks allow.
-- **Aggregate intervals under-cover.** At 95% nominal, store coverage is 92.6% and category 92.4%; at 80% nominal, state/total/store cover about 71%.
-- **Item-level accuracy is modest** (WMAPE 0.74 daily; 0.30–0.36 for fast sellers over their replenishment window, above 1.0 for sporadic ones). The product model under-forecasts sporadic and slow sellers and is biased up on fast Household items.
-- **Temporal reconciliation did not help.** Pulling aggregate daily forecasts toward weekly ARIMA forecasts made the base SARIMA slightly worse (state WMAPE 0.0502 vs 0.0462) and left reconciled accuracy unchanged, so it is off by default (`--temporal`).
-- **The override demo is automatic, not planner input.** A bias-correction rule for products with a persistent tracking signal adds value on the products it flags (FVA +2 to +11 pts WMAPE) and a negligible amount overall; real planner overrides would need real data.
-- A classical model forecasting the store and regional totals directly can be more accurate at those levels, but its numbers don't add up across the hierarchy, so it can't be used as a plan.
-- The run covers California only; extending to all states needs more memory than a laptop.
+- **M5 has no inventory, lead-time, cost or case-pack data.** Starting stock, lead times and their spread, margins (which set unit costs) and holding rates are stated assumptions in `pipeline.Config` and `TwinConfig`. The warehouse → store leg has a fixed one-day lead time.
+- **M5 records sales, not demand.** A zero can mean no demand or no stock. Probable stockouts are masked for steady sellers (≈4% of days), but some censoring remains, so accuracy is measured against sales that are themselves censored.
+- **Product-level accuracy is modest.** Daily WMAPE is 0.74 (0.30–0.36 for fast sellers over their replenishment window, above 1.0 for sporadic ones).
+- **Aggregate ranges under-cover.** At 95% nominal, store and category coverage is about 92.5%.
+- **Allocation is planned by department** (28 store × department targets). Product-level sharing happens inside the twin.
+- **Things that didn't help are reported and switched off:**
+  - Temporal reconciliation made aggregate forecasts slightly worse.
+  - An automatic bias-correction "override" only helps the products it flags.
+- **California only.** Extending to all ten M5 stores needs more memory than a laptop.
+
+## How it's evaluated
+
+- **Backtests, then a holdout.** Three rolling 28-day backtests, then a final 28-day holdout. Model and reconciliation choices use backtests only.
+- **Decision-level accuracy.** Forecasts are also scored over each product's replenishment window, with bias by weekday and event days and a tracking-signal list of products the forecast keeps missing in one direction.
+- **Allocation backtest.** Weekly allocations are scored on realised sales, with stores carrying stock from week to week, and reported with a 95% confidence interval.
+- **Tests.** 105 Python tests, including closed-form newsvendor checks, unit conservation and a full synthetic pipeline run. 14 web tests, including the Pyodide/CPython parity check. CI runs everything on every push.
+
+## Repository layout
+
+```
+src/forecasting/
+  pipeline.py        end-to-end run: features → models → reconciliation → intervals → allocation → twin
+  reconciliation.py  MinT (Woodbury), bottom-up, top-down
+  probabilistic.py   conformal intervals, ABC × XYZ safety stock
+  allocation.py      scenario LP (PuLP + HiGHS)
+  stockouts.py       probable-stockout detection
+  twin.py            the inventory simulator (numpy only; also runs in the browser)
+  twin_runs.py       validation, cost curves, policy curves, stress tests, watch-list
+web/                 React + Vite + TypeScript app; simulator in a Pyodide web worker
+api/                 FastAPI service: forecasts, metrics, live what-if simulations
+notebooks/           walkthrough of every result
+tableau/, looker_studio/   BI exports
+data/dashboard/      committed results extract the app and API read
+```
 
 ## Run it
 
@@ -105,24 +135,25 @@ flowchart LR
 python -m pip install -e ".[prophet,api,data,dev]"   # macOS: brew install libomp
 python scripts/download_data.py                      # downloads and verifies the M5 data
 python -m forecasting --states CA                    # prepare the data
-python -m forecasting.pipeline                       # train, evaluate, simulate, write results (~16 min on a laptop)
+python -m forecasting.pipeline                       # full run, ~25 min on a laptop
 python -m pytest -q
-python -m forecasting.replay --weeks 8               # optional: replay the weekly planning cycle (one fit per week)
 
-# web app (static; the simulator runs in your browser)
-python scripts/build_web_data.py                     # data/dashboard -> web/public
-cd web && npm install && npm run dev                 # or: npm test, npm run build
+# web app
+python scripts/build_web_data.py                     # data/dashboard → web/public (~90 s of preset simulations)
+cd web && npm install && npm run dev
 
 # API
-DATA_DIR=data/dashboard uvicorn api.main:app         # /docs for the OpenAPI page
+DATA_DIR=data/dashboard uvicorn api.main:app         # OpenAPI docs at /docs
 ```
 
-Useful flags: `--no-twin`, `--temporal`, `--max-items 300 --no-prophet --no-mlflow` for a 3-minute smoke run.
+Quick smoke run: `python -m forecasting.pipeline --max-items 300 --no-prophet --no-mlflow` (about 3 minutes; it overwrites `data/gold` and `data/dashboard`). Other flags: `--no-twin`, `--temporal`. To replay the weekly planning cycle: `python -m forecasting.replay --weeks 8`.
 
 ## Deploy
 
-- **Web app → Vercel:** import the repo and set the root directory to `web/`. [`web/vercel.json`](web/vercel.json) runs `npm run build:vercel`, which installs numpy/pandas/pyarrow into a throwaway virtualenv (Vercel's Python is uv-managed and refuses system installs), regenerates `web/public/data` and `web/public/py` from the committed extract in `data/dashboard/` (including about 90 s of preset what-if runs), then builds. It also sets cache headers and a content-security-policy that allows only the Pyodide CDN. Everything is static: no backend, no cold starts. If a future build image can't run the Python step, remove `web/public/data` and `web/public/py` from `web/.gitignore`, run `python scripts/build_web_data.py` locally, commit the output (about 17 MB), and set the build command back to `npm run build`.
-- **API (optional):** [`api/requirements.txt`](api/requirements.txt) is the slim install (no modelling stack). Set `DATA_DIR=data/dashboard`, `ALLOWED_ORIGINS`, and `TRUSTED_PROXY_HOPS` when behind a proxy. `POST /twin/simulate` runs the whole network (one bundle, `twin_inputs/network.npz`, since every store shares the DC), returns KPIs for all stores and each store, and is capped at 50 futures and rate-limited.
-- **CI:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the Python tests, checks the browser snapshot is current, builds the web data, then lints, tests and builds the web app.
+- **Web app (Vercel).** Import the repo with root directory `web/`. [`web/vercel.json`](web/vercel.json) builds the static data from `data/dashboard/` in a throwaway virtualenv, then builds the app, with cache headers and a content-security policy that allows only the Pyodide CDN. Every push to `main` redeploys.
+- **API (optional).** [`api/requirements.txt`](api/requirements.txt) is a slim install with no modelling stack.
+  - Set `DATA_DIR`, `ALLOWED_ORIGINS`, and `TRUSTED_PROXY_HOPS` when running behind a proxy.
+  - `POST /twin/simulate` runs the whole network from `twin_inputs/network.npz` and returns KPIs for all stores and each store. It is capped at 50 futures and rate-limited.
+- **CI.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the Python tests, checks the browser snapshot is current, builds the web data, then lints, tests and builds the app.
 
-The web app and the API read the committed extract in `data/dashboard/`. See [tableau/README.md](tableau/README.md) and [looker_studio/](looker_studio/) for the BI versions.
+**Stack:** Python · pandas · LightGBM · statsmodels · PuLP/HiGHS · MLflow · FastAPI · React · TypeScript · Recharts · Pyodide · Vercel · GitHub Actions
